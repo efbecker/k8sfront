@@ -1,0 +1,22 @@
+# Go
+/apps/api/bin/
+*.test
+*.out
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime data
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
