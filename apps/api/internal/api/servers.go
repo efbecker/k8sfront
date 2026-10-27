@@ -292,7 +292,9 @@ func (s *Server) deleteServer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func hostPort(srv *store.Server) string { return sshx.Target{Host: srv.Host, Port: srv.Port}.HostPort() }
+func hostPort(srv *store.Server) string {
+	return sshx.Target{Host: srv.Host, Port: srv.Port}.HostPort()
+}
 
 func (s *Server) getHostKey(w http.ResponseWriter, r *http.Request) {
 	srv, err := s.Store.GetServer(r.Context(), r.PathValue("id"))

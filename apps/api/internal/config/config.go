@@ -30,13 +30,13 @@ type Config struct {
 // Load reads the environment.
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:          env("K8SFRONT_ADDR", ":8080"),
-		DataDir:       env("K8SFRONT_DATA_DIR", "./data"),
-		MasterKey:     os.Getenv("K8SFRONT_MASTER_KEY"),
-		AdminToken:    os.Getenv("K8SFRONT_ADMIN_TOKEN"),
-		WebDir:        os.Getenv("K8SFRONT_WEB_DIR"),
-		LogLevel:      env("K8SFRONT_LOG_LEVEL", "info"),
-		SecureCookies: envBool("K8SFRONT_SECURE_COOKIES", false),
+		Addr:           env("K8SFRONT_ADDR", ":8080"),
+		DataDir:        env("K8SFRONT_DATA_DIR", "./data"),
+		MasterKey:      os.Getenv("K8SFRONT_MASTER_KEY"),
+		AdminToken:     os.Getenv("K8SFRONT_ADMIN_TOKEN"),
+		WebDir:         os.Getenv("K8SFRONT_WEB_DIR"),
+		LogLevel:       env("K8SFRONT_LOG_LEVEL", "info"),
+		SecureCookies:  envBool("K8SFRONT_SECURE_COOKIES", false),
 		StrictHostKeys: envBool("K8SFRONT_STRICT_HOST_KEYS", false),
 	}
 	c.DBPath = env("K8SFRONT_DB_PATH", filepath.Join(c.DataDir, "k8sfront.db"))

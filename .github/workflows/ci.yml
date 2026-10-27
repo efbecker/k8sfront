@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l apps/api)" || (gofmt -l apps/api && exit 1)
+      - name: vet
+        working-directory: apps/api
+        run: go vet ./... && go vet -tags integration ./test/...
+      - name: unit tests
+        working-directory: apps/api
+        run: go test -race ./...
+      - name: pull Debian 13 image for the e2e test
+        run: docker pull debian:trixie && docker tag debian:trixie mirror.gcr.io/library/debian:trixie
+      - name: integration tests (real sudo + Debian 13 container)
+        working-directory: apps/api
+        run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" go test -tags integration -count=1 ./test/integration/...
+
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck -w apps/web
+      - run: npm run test -w apps/web
+      - run: npm run build -w apps/web

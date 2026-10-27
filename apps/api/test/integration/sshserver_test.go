@@ -21,15 +21,15 @@ import (
 // Debian 13 container), so sudo, os-release and shell behaviour are genuine;
 // only the sshd daemon is replaced.
 type testSSHServer struct {
-	Addr      string
-	Users     map[string]string // user -> password ("" disables password auth)
-	AuthKeys  map[string]ssh.PublicKey
-	Backend   func(user, cmd string) *exec.Cmd
-	HostKey   ssh.Signer
-	ln        net.Listener
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	Commands  []string // argv-level command lines received (what `ps` would show)
+	Addr     string
+	Users    map[string]string // user -> password ("" disables password auth)
+	AuthKeys map[string]ssh.PublicKey
+	Backend  func(user, cmd string) *exec.Cmd
+	HostKey  ssh.Signer
+	ln       net.Listener
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	Commands []string // argv-level command lines received (what `ps` would show)
 }
 
 func newHostKey(t *testing.T) ssh.Signer {
