@@ -11,7 +11,10 @@ import (
 
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
 	"github.com/efbecker/k8sfront/apps/api/internal/preflight"
+	"github.com/efbecker/k8sfront/apps/api/internal/redact"
 	"github.com/efbecker/k8sfront/apps/api/internal/remote"
+	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
+	"github.com/efbecker/k8sfront/apps/api/internal/sshx"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
 )
 
@@ -34,11 +37,37 @@ type PreflightResult struct {
 type Ops struct {
 	Store     store.Store
 	Connector *remote.Connector
+	Secrets   *secrets.Manager
+	// Open overrides how node sessions are opened (tests); defaults to Connector.Open.
+	Open func(ctx context.Context, s *store.Server, hooks remote.Hooks) (Runner, error)
+	// ReadyTimeout bounds the final wait for all nodes to be Ready (default 15m).
+	ReadyTimeout time.Duration
+	// PollInterval is the Ready polling interval (default 10s).
+	PollInterval time.Duration
+}
+
+// Runner is an open, validated session on a node.
+type Runner interface {
+	Run(ctx context.Context, script string, opts sshx.RunOptions, sink sshx.Sink) (*sshx.Result, error)
+	Redactor() *redact.Redactor
+	Close() error
+}
+
+func (o *Ops) open(ctx context.Context, s *store.Server, hooks remote.Hooks) (Runner, error) {
+	if o.Open != nil {
+		return o.Open(ctx, s, hooks)
+	}
+	sess, err := o.Connector.Open(ctx, s, hooks)
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
 }
 
 // Register installs every handler on the engine.
 func (o *Ops) Register(e *jobs.Engine) {
 	e.Register(KindPreflight, o.preflight)
+	e.Register(KindBootstrap, o.bootstrap)
 }
 
 func (o *Ops) preflight(ctx context.Context, jc *jobs.Context) error {

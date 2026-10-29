@@ -19,6 +19,7 @@ import (
 	"github.com/efbecker/k8sfront/apps/api/internal/api"
 	"github.com/efbecker/k8sfront/apps/api/internal/config"
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
+	"github.com/efbecker/k8sfront/apps/api/internal/k8sver"
 	"github.com/efbecker/k8sfront/apps/api/internal/ops"
 	"github.com/efbecker/k8sfront/apps/api/internal/remote"
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
@@ -79,7 +80,7 @@ func run() error {
 
 	hub := jobs.NewHub(db, logger)
 	engine := jobs.New(db, hub, logger, cfg.Workers)
-	(&ops.Ops{Store: db, Connector: conn}).Register(engine)
+	(&ops.Ops{Store: db, Connector: conn, Secrets: sec}).Register(engine)
 	if err := engine.Start(ctx); err != nil {
 		return fmt.Errorf("start job engine: %w", err)
 	}
@@ -87,6 +88,7 @@ func run() error {
 	srv := &api.Server{
 		Store: db, Secrets: sec, Engine: engine, Connector: conn, Log: logger,
 		Auth:           api.NewAuth(adminToken, key, cfg.SessionTTL, cfg.SecureCookies),
+		Versions:       k8sver.NewFetcher(),
 		WebDir:         cfg.WebDir,
 		AllowedOrigins: cfg.AllowedOrigins,
 	}

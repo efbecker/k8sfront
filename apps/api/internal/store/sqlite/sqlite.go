@@ -365,41 +365,122 @@ func (d *DB) DeleteKnownHost(ctx context.Context, hostPort string) error {
 
 // --- clusters ------------------------------------------------------------------
 
+const clusterCols = `id, name, kubernetes_version, pod_cidr, service_cidr, cni, topology,
+	control_plane_endpoint, status, options, api_server_url, kubeconfig_secret_id, created_at, updated_at`
+
+func scanCluster(r scanner) (*store.Cluster, error) {
+	var c store.Cluster
+	var kc sql.NullString
+	var opts, created, updated string
+	if err := r.Scan(&c.ID, &c.Name, &c.KubernetesVersion, &c.PodCIDR, &c.ServiceCIDR, &c.CNI, &c.Topology,
+		&c.ControlPlaneEndpoint, &c.Status, &opts, &c.APIServerURL, &kc, &created, &updated); err != nil {
+		return nil, err
+	}
+	c.Options = json.RawMessage(opts)
+	c.KubeconfigSecretID = strPtr(kc)
+	c.CreatedAt, c.UpdatedAt = parseTS(created), parseTS(updated)
+	return &c, nil
+}
+
+func clusterOpts(c *store.Cluster) string {
+	if len(c.Options) == 0 {
+		return "{}"
+	}
+	return string(c.Options)
+}
+
 func (d *DB) CreateCluster(ctx context.Context, c *store.Cluster) error {
 	now := time.Now()
 	c.CreatedAt, c.UpdatedAt = now, now
 	if c.Status == "" {
-		c.Status = "draft"
+		c.Status = store.ClusterDraft
 	}
-	_, err := d.db.ExecContext(ctx, `INSERT INTO clusters(id, name, kubernetes_version, pod_cidr, service_cidr, cni, topology,
-		control_plane_endpoint, status, kubeconfig_secret_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := d.db.ExecContext(ctx, `INSERT INTO clusters(`+clusterCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, c.Name, c.KubernetesVersion, c.PodCIDR, c.ServiceCIDR, c.CNI, c.Topology,
-		c.ControlPlaneEndpoint, c.Status, c.KubeconfigSecretID, ts(c.CreatedAt), ts(c.UpdatedAt))
+		c.ControlPlaneEndpoint, c.Status, clusterOpts(c), c.APIServerURL, c.KubeconfigSecretID, ts(c.CreatedAt), ts(c.UpdatedAt))
 	if isUnique(err) {
 		return fmt.Errorf("%w: cluster %q already exists", store.ErrConflict, c.Name)
 	}
 	return err
 }
 
+func (d *DB) UpdateCluster(ctx context.Context, c *store.Cluster) error {
+	c.UpdatedAt = time.Now()
+	res, err := d.db.ExecContext(ctx, `UPDATE clusters SET name=?, kubernetes_version=?, pod_cidr=?, service_cidr=?, cni=?, topology=?,
+		control_plane_endpoint=?, status=?, options=?, api_server_url=?, kubeconfig_secret_id=?, updated_at=? WHERE id=?`,
+		c.Name, c.KubernetesVersion, c.PodCIDR, c.ServiceCIDR, c.CNI, c.Topology, c.ControlPlaneEndpoint, c.Status,
+		clusterOpts(c), c.APIServerURL, c.KubeconfigSecretID, ts(c.UpdatedAt), c.ID)
+	if isUnique(err) {
+		return fmt.Errorf("%w: cluster %q already exists", store.ErrConflict, c.Name)
+	}
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) GetCluster(ctx context.Context, id string) (*store.Cluster, error) {
+	c, err := scanCluster(d.db.QueryRowContext(ctx, `SELECT `+clusterCols+` FROM clusters WHERE id = ?`, id))
+	return c, notFound(err)
+}
+
 func (d *DB) ListClusters(ctx context.Context) ([]store.Cluster, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT id, name, kubernetes_version, pod_cidr, service_cidr, cni, topology,
-		control_plane_endpoint, status, kubeconfig_secret_id, created_at, updated_at FROM clusters ORDER BY name`)
+	rows, err := d.db.QueryContext(ctx, `SELECT `+clusterCols+` FROM clusters ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []store.Cluster{}
 	for rows.Next() {
-		var c store.Cluster
-		var kc sql.NullString
-		var created, updated string
-		if err := rows.Scan(&c.ID, &c.Name, &c.KubernetesVersion, &c.PodCIDR, &c.ServiceCIDR, &c.CNI, &c.Topology,
-			&c.ControlPlaneEndpoint, &c.Status, &kc, &created, &updated); err != nil {
+		c, err := scanCluster(rows)
+		if err != nil {
 			return nil, err
 		}
-		c.KubeconfigSecretID = strPtr(kc)
-		c.CreatedAt, c.UpdatedAt = parseTS(created), parseTS(updated)
-		out = append(out, c)
+		out = append(out, *c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) DeleteCluster(ctx context.Context, id string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var kc sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT kubeconfig_secret_id FROM clusters WHERE id = ?`, id).Scan(&kc); err != nil {
+		return notFound(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE servers SET cluster_id = NULL, updated_at = ? WHERE cluster_id = ?`, ts(time.Now()), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM clusters WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if kc.Valid {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE id = ?`, kc.String); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (d *DB) ListClusterServers(ctx context.Context, clusterID string) ([]store.Server, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+serverCols+` FROM servers WHERE cluster_id = ? ORDER BY role, name, host`, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []store.Server{}
+	for rows.Next() {
+		s, err := scanServer(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
 	}
 	return out, rows.Err()
 }

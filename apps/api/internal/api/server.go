@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
+	"github.com/efbecker/k8sfront/apps/api/internal/k8sver"
 	"github.com/efbecker/k8sfront/apps/api/internal/remote"
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
@@ -29,6 +30,7 @@ type Server struct {
 	Engine         *jobs.Engine
 	Connector      *remote.Connector
 	Auth           *Auth
+	Versions       *k8sver.Fetcher
 	Log            *slog.Logger
 	WebDir         string
 	AllowedOrigins []string
@@ -61,6 +63,14 @@ func (s *Server) Handler() http.Handler {
 	priv("POST /api/v1/jobs/{id}/cancel", s.cancelJob)
 	priv("POST /api/v1/jobs/{id}/retry", s.retryJob)
 	priv("GET /api/v1/jobs/{id}/stream", s.streamJob)
+
+	priv("GET /api/v1/kubernetes/versions", s.kubernetesVersions)
+	priv("GET /api/v1/clusters", s.listClusters)
+	priv("POST /api/v1/clusters", s.createCluster)
+	priv("GET /api/v1/clusters/{id}", s.getCluster)
+	priv("DELETE /api/v1/clusters/{id}", s.deleteCluster)
+	priv("POST /api/v1/clusters/{id}/bootstrap", s.bootstrapCluster)
+	priv("GET /api/v1/clusters/{id}/kubeconfig", s.downloadKubeconfig)
 
 	priv("GET /api/v1/audit", s.listAudit)
 

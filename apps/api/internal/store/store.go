@@ -99,19 +99,29 @@ type KnownHost struct {
 
 // Cluster is a Kubernetes cluster managed by the platform (used from phase 2).
 type Cluster struct {
-	ID                   string    `json:"id"`
-	Name                 string    `json:"name"`
-	KubernetesVersion    string    `json:"kubernetesVersion"`
-	PodCIDR              string    `json:"podCidr"`
-	ServiceCIDR          string    `json:"serviceCidr"`
-	CNI                  string    `json:"cni"`
-	Topology             string    `json:"topology"`
-	ControlPlaneEndpoint string    `json:"controlPlaneEndpoint"`
-	Status               string    `json:"status"`
-	KubeconfigSecretID   *string   `json:"-"`
-	CreatedAt            time.Time `json:"createdAt"`
-	UpdatedAt            time.Time `json:"updatedAt"`
+	ID                   string          `json:"id"`
+	Name                 string          `json:"name"`
+	KubernetesVersion    string          `json:"kubernetesVersion"`
+	PodCIDR              string          `json:"podCidr"`
+	ServiceCIDR          string          `json:"serviceCidr"`
+	CNI                  string          `json:"cni"`
+	Topology             string          `json:"topology"`
+	ControlPlaneEndpoint string          `json:"controlPlaneEndpoint"`
+	Status               string          `json:"status"`
+	Options              json.RawMessage `json:"options"`
+	APIServerURL         string          `json:"apiServerUrl"`
+	KubeconfigSecretID   *string         `json:"-"`
+	CreatedAt            time.Time       `json:"createdAt"`
+	UpdatedAt            time.Time       `json:"updatedAt"`
 }
+
+// Cluster lifecycle states.
+const (
+	ClusterDraft        = "draft"
+	ClusterProvisioning = "provisioning"
+	ClusterReady        = "ready"
+	ClusterFailed       = "failed"
+)
 
 // JobStatus is a state in the job state machine (see ARCHITECTURE.md).
 type JobStatus string
@@ -233,7 +243,13 @@ type Store interface {
 	DeleteKnownHost(ctx context.Context, hostPort string) error
 
 	CreateCluster(ctx context.Context, c *Cluster) error
+	UpdateCluster(ctx context.Context, c *Cluster) error
+	GetCluster(ctx context.Context, id string) (*Cluster, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
+	// DeleteCluster removes the cluster and its kubeconfig secret; member
+	// servers are detached (cluster_id set to NULL), not deleted.
+	DeleteCluster(ctx context.Context, id string) error
+	ListClusterServers(ctx context.Context, clusterID string) ([]Server, error)
 
 	CreateJob(ctx context.Context, j *Job) error
 	GetJob(ctx context.Context, id string) (*Job, error)

@@ -29,6 +29,9 @@ type RunOptions struct {
 	Env  map[string]string // extra exported variables (values are shell-quoted)
 	// CaptureLimit bounds the raw stdout kept in Result.Stdout (default 1 MiB).
 	CaptureLimit int
+	// Quiet keeps stdout out of the sink (it is still captured in Result.Stdout).
+	// Use it for commands whose output is itself a secret, e.g. admin.conf.
+	Quiet bool
 }
 
 // Result of a remote execution.
@@ -167,7 +170,11 @@ func (c *Client) Run(ctx context.Context, script string, opts RunOptions, sink S
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		lw := redact.NewLineWriter(c.redactor, func(l string) { sink(store.StreamStdout, l) })
+		lw := redact.NewLineWriter(c.redactor, func(l string) {
+			if !opts.Quiet {
+				sink(store.StreamStdout, l)
+			}
+		})
 		_, _ = io.Copy(io.MultiWriter(lw, capture), stdoutR)
 		lw.Flush()
 	}()
