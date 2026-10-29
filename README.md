@@ -6,7 +6,22 @@ Kubernetes sobre **Debian 13 (Trixie) ou superior**.
 - `apps/api`: control plane em Go (SQLite WAL, cofre AES-256-GCM, motor SSH + sudo, jobs em background, WebSocket)
 - `apps/web`: React + TypeScript + Vite, Tailwind, componentes estilo shadcn/ui, TanStack Query, Xterm.js
 
-## Começando
+## Instalação num servidor Debian 13+
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/efbecker/k8sfront/main/install.sh | sudo bash
+sudo cat /var/lib/k8sfront/admin.token   # token de login
+```
+
+O instalador valida Debian 13+, instala em `/opt/k8sfront`, guarda dados em `/var/lib/k8sfront` e cria o serviço
+systemd `k8sfront` (usuário dedicado, sandbox do systemd). Usa a release publicada mais recente (tarball com sha256);
+se ainda não houver release, compila do código-fonte (Go baixado de go.dev com sha256 + Node.js do Debian).
+Rodar de novo atualiza no lugar. Opções: `K8SFRONT_PORT`, `K8SFRONT_LISTEN`, `K8SFRONT_VERSION` (tag ou `main`),
+`K8SFRONT_SOURCE=auto|release|source`, ex.: `curl -fsSL ... | sudo K8SFRONT_PORT=9090 bash`.
+
+Releases: `git tag v0.2.0 && git push origin v0.2.0` dispara o workflow que publica os tarballs (`make dist`).
+
+## Desenvolvimento
 
 ```bash
 make deps

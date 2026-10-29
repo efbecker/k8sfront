@@ -24,7 +24,9 @@ apps/web   Frontend React + TypeScript + Vite + Tailwind v4 + componentes estilo
 | Testes unitários (Go com `-race` + Vitest) | `make test` |
 | Integração SSH/sudo real (precisa root; Docker opcional) | `make test-integration` |
 | gofmt + vet + typecheck | `make lint` |
+| Tarballs de release + SHA256SUMS em `dist/` | `make dist VERSION=vX.Y.Z` |
 
+Instalação em servidor: `install.sh` (curl | sudo bash; release com sha256 ou build do fonte, serviço systemd). Teste mudanças nele num container `debian:trixie`.
 Login local: o token de admin vem de `K8SFRONT_ADMIN_TOKEN` ou é gerado em `data/admin.token` na primeira execução.
 Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.go`.
 

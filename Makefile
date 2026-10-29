@@ -25,6 +25,18 @@ build-api: ## Build the Go control plane binary
 build-web: ## Build the React frontend into apps/web/dist
 	npm run build -w $(WEB_DIR)
 
+.PHONY: dist
+dist: build-web ## Release tarballs (linux amd64/arm64) + SHA256SUMS in dist/, used by install.sh
+	rm -rf dist && mkdir -p dist
+	set -e; for arch in amd64 arm64; do \
+	  stage=dist/stage-$$arch/k8sfront; mkdir -p $$stage/bin $$stage/web; \
+	  (cd $(API_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "-s -w -X github.com/efbecker/k8sfront/apps/api/internal/api.Version=$(VERSION)" -o ../../$$stage/bin/k8sfront-api ./cmd/k8sfront-api); \
+	  cp -r $(WEB_DIR)/dist/. $$stage/web/; cp install.sh LICENSE* README.md $$stage/ 2>/dev/null || true; \
+	  tar -C dist/stage-$$arch -czf dist/k8sfront_$(VERSION)_linux_$$arch.tar.gz k8sfront; \
+	done
+	rm -rf dist/stage-*
+	cd dist && sha256sum k8sfront_*.tar.gz > SHA256SUMS
+
 .PHONY: run
 run: build ## Build everything and serve the SPA from the API on :8080
 	K8SFRONT_WEB_DIR=$(WEB_DIR)/dist ./$(BIN)
@@ -60,4 +72,4 @@ lint: ## gofmt + go vet + TypeScript typecheck
 
 .PHONY: clean
 clean: ## Remove build outputs
-	rm -rf $(API_DIR)/bin $(WEB_DIR)/dist
+	rm -rf $(API_DIR)/bin $(WEB_DIR)/dist dist
