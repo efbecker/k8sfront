@@ -17,7 +17,7 @@ export function LoginPage() {
     mutationFn: () => api.login(token),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["me"] });
-      navigate("/servers", { replace: true });
+      navigate("/", { replace: true });
     },
   });
 

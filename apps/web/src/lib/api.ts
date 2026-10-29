@@ -127,6 +127,55 @@ export interface AuditEntry {
   remoteAddr: string;
 }
 
+export type CNI = "cilium" | "calico";
+export type Topology = "single-node" | "multi-node";
+export type ClusterStatus = "draft" | "provisioning" | "ready" | "failed";
+
+export interface K8sRelease {
+  version: string;
+  minor: string;
+  latest: boolean;
+}
+
+export interface ClusterOptions {
+  untaintControlPlane: boolean;
+  metricsServer: boolean;
+  kubeVip?: { address: string; interface?: string };
+  cniVersion?: string;
+  extraSans?: string[];
+}
+
+export interface Cluster {
+  id: string;
+  name: string;
+  kubernetesVersion: string;
+  podCidr: string;
+  serviceCidr: string;
+  cni: CNI;
+  topology: Topology;
+  controlPlaneEndpoint: string;
+  status: ClusterStatus;
+  options: ClusterOptions;
+  apiServerUrl: string;
+  hasKubeconfig: boolean;
+  nodes: Server[];
+  bootstrapJob?: Job;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClusterInput {
+  name: string;
+  kubernetesVersion: string;
+  podCidr: string;
+  serviceCidr: string;
+  cni: CNI;
+  topology: Topology;
+  options: ClusterOptions;
+  nodes: { serverId: string; role: "control-plane" | "worker" }[];
+  start: boolean;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -185,6 +234,14 @@ export const api = {
   retryJob: (id: string) => request<void>("POST", `/jobs/${id}/retry`),
 
   audit: () => request<AuditEntry[]>("GET", "/audit"),
+
+  kubernetesVersions: () => request<K8sRelease[]>("GET", "/kubernetes/versions"),
+  clusters: () => request<Cluster[]>("GET", "/clusters"),
+  cluster: (id: string) => request<Cluster>("GET", `/clusters/${id}`),
+  createCluster: (input: ClusterInput) => request<Cluster>("POST", "/clusters", input),
+  deleteCluster: (id: string) => request<void>("DELETE", `/clusters/${id}`),
+  bootstrapCluster: (id: string) => request<Job>("POST", `/clusters/${id}/bootstrap`),
+  kubeconfigUrl: (id: string) => `/api/v1/clusters/${id}/kubeconfig`,
 };
 
 export const isFinal = (s: JobStatus) => s === "succeeded" || s === "failed" || s === "cancelled" || s === "paused";

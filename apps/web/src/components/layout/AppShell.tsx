@@ -2,10 +2,12 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Boxes,
+  Container,
   ClipboardList,
   LayoutDashboard,
   LogOut,
   Network,
+  PackagePlus,
   Rocket,
   RefreshCcw,
   Server,
@@ -28,6 +30,7 @@ const nav: { title: string; items: NavItem[] }[] = [
   {
     title: "Infraestrutura",
     items: [
+      { to: "/clusters", label: "Clusters", icon: Boxes },
       { to: "/servers", label: "Servidores", icon: Server },
       { to: "/jobs", label: "Operações", icon: ClipboardList },
       { to: "/audit", label: "Auditoria", icon: ScrollText },
@@ -36,11 +39,11 @@ const nav: { title: string; items: NavItem[] }[] = [
   {
     title: "Cluster",
     items: [
-      { to: "/bootstrap", label: "Deploy do Cluster", icon: Rocket, phase: 2 },
+      { to: "/clusters/new", label: "Wizard de Deploy", icon: Rocket },
       { to: "/overview", label: "Visão Geral", icon: LayoutDashboard, phase: 3 },
-      { to: "/workloads", label: "Workloads", icon: Boxes, phase: 3 },
+      { to: "/workloads", label: "Workloads", icon: Container, phase: 3 },
       { to: "/network", label: "Rede & Storage", icon: Network, phase: 3 },
-      { to: "/apps", label: "Central de Deploy", icon: Rocket, phase: 4 },
+      { to: "/apps", label: "Central de Deploy", icon: PackagePlus, phase: 4 },
       { to: "/updates", label: "Updates & Lifecycle", icon: RefreshCcw, phase: 5 },
     ],
   },

@@ -12,6 +12,9 @@ import { ServerDetailPage } from "@/pages/ServerDetail";
 import { JobsPage } from "@/pages/Jobs";
 import { JobDetailPage } from "@/pages/JobDetail";
 import { AuditPage } from "@/pages/Audit";
+import { ClustersPage, HomeRedirect } from "@/pages/Clusters";
+import { ClusterDetailPage } from "@/pages/ClusterDetail";
+import { ClusterWizardPage } from "@/pages/ClusterWizard";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -49,13 +52,16 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/login" element={<LoginPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<AppShell />}>
-                <Route index element={<Navigate to="/servers" replace />} />
+                <Route index element={<HomeRedirect />} />
+                <Route path="/clusters" element={<ClustersPage />} />
+                <Route path="/clusters/new" element={<ClusterWizardPage />} />
+                <Route path="/clusters/:id" element={<ClusterDetailPage />} />
                 <Route path="/servers" element={<ServersPage />} />
                 <Route path="/servers/:id" element={<ServerDetailPage />} />
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/jobs/:id" element={<JobDetailPage />} />
                 <Route path="/audit" element={<AuditPage />} />
-                <Route path="*" element={<Navigate to="/servers" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>
           </Routes>

@@ -72,3 +72,20 @@ export const sudoLabel: Record<SudoMode, string> = {
 };
 
 export const roleLabel = (r: string) => (r === "control-plane" ? "Control Plane" : r === "worker" ? "Worker" : "Sem papel");
+
+const clusterMap: Record<string, { label: string; variant: "success" | "destructive" | "info" | "secondary" }> = {
+  draft: { label: "Rascunho", variant: "secondary" },
+  provisioning: { label: "Provisionando", variant: "info" },
+  ready: { label: "Pronto", variant: "success" },
+  failed: { label: "Falhou", variant: "destructive" },
+};
+
+export function ClusterStatusBadge({ status }: { status: string }) {
+  const m = clusterMap[status] ?? { label: status, variant: "secondary" as const };
+  return (
+    <Badge variant={m.variant}>
+      {status === "provisioning" && <Loader2 className="animate-spin" />}
+      {m.label}
+    </Badge>
+  );
+}

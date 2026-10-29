@@ -35,6 +35,8 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 - Persistência só através da interface `store.Store`. SQL específico de SQLite fica em `internal/store/sqlite`; nada fora desse pacote importa o driver. Novas tabelas = novo arquivo `migrations/NNNN_nome.sql` (nunca edite uma migration já publicada).
 - Operações longas são **jobs** (`internal/jobs`), nunca trabalho dentro do handler HTTP. Handlers de job ficam em `internal/ops`, são idempotentes e usam `jc.StepOnce` para etapas que não devem repetir num retry.
 - Erros de validação → 400 com `{"error":"validation","message":...}`; use `store.ErrNotFound`/`store.ErrConflict` para 404/409.
+- Scripts de bootstrap ficam em `internal/bootstrap/scripts/*.sh` (text/template com delimitadores `<% %>`, use `q` para quoting). Todo script novo precisa passar no `bash -n` do teste e não pode conter `apt-key` nem segredos em linha de comando; segredos de kubeadm entram por process substitution.
+- Versões de componentes (Cilium, Calico, kube-vip, metrics-server) são fixadas em `internal/bootstrap/spec.go`; atualize lá e rode `K8SFRONT_KUBEADM=/caminho/kubeadm go test ./internal/bootstrap/` quando mexer nas configs do kubeadm.
 - `gofmt` obrigatório; testes ao lado do código (`*_test.go`), integração com build tag `integration` em `test/integration`.
 
 ## Convenções Web (`apps/web`)

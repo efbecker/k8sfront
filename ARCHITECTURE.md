@@ -3,7 +3,7 @@
 Plataforma web para **provisionamento (bootstrap), gestão diária, deploy de aplicações e rolling upgrades**
 de clusters Kubernetes que rodam exclusivamente sobre **Debian 13 (Trixie) ou superior**.
 
-Status: **Fase 1 entregue** (fundação). As seções marcadas com _(Fase N)_ descrevem o desenho alvo das fases seguintes.
+Status: **Fases 1 e 2 entregues** (fundação + bootstrap com Wizard de Deploy). As seções marcadas com _(Fase N)_ descrevem o desenho alvo das fases seguintes.
 
 ---
 
@@ -76,8 +76,9 @@ Princípios:
         └── pages/            Login, Servidores, Detalhe do servidor, Operações, Detalhe do job, Auditoria
 ```
 
-Pacotes previstos nas próximas fases: `internal/bootstrap` (scripts kubeadm/containerd/CNI, Fase 2),
-`internal/kube` (client-go, Fase 3), `internal/deploy` + `internal/helm` (Fase 4),
+Fase 2 adicionou `internal/bootstrap` (spec, configs kubeadm v1beta4, scripts embutidos em `scripts/*.sh`),
+`internal/k8sver` (versões estáveis de `dl.k8s.io`) e `internal/ops/bootstrap.go`.
+Pacotes previstos nas próximas fases: `internal/kube` (client-go, Fase 3), `internal/deploy` + `internal/helm` (Fase 4),
 `internal/upgrade` + `internal/ospatch` (Fase 5).
 
 ---
@@ -91,12 +92,12 @@ então uma implementação PostgreSQL só precisa satisfazer a interface e porta
 
 Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e registradas em `schema_migrations`.
 
-### Tabelas (0001_init.sql)
+### Tabelas (0001_init.sql + 0002_cluster_options.sql)
 
 | Tabela | Finalidade | Colunas principais |
 | --- | --- | --- |
 | `secrets` | blobs cifrados | `id`, `kind` (ssh_private_key, ssh_key_passphrase, ssh_password, sudo_password, kubeconfig), `ciphertext`, `key_id` |
-| `clusters` | clusters gerenciados (Fase 2+) | `name`, `kubernetes_version`, `pod_cidr`, `service_cidr`, `cni`, `topology`, `control_plane_endpoint`, `status`, `kubeconfig_secret_id` |
+| `clusters` | clusters gerenciados (Fase 2+) | `name`, `kubernetes_version`, `pod_cidr`, `service_cidr`, `cni`, `topology`, `control_plane_endpoint`, `status` (draft/provisioning/ready/failed), `kubeconfig_secret_id`, `options` (JSON: kube-vip, untaint, metrics-server, versão do CNI), `api_server_url` |
 | `servers` | inventário Debian 13+ | `host`, `port`, `ssh_user`, `auth_method`, `role`, `credential_secret_id`, `passphrase_secret_id`, `sudo_secret_id`, `sudo_mode`, `os_*`, `kernel`, `last_check_*`; `UNIQUE(host, port)` |
 | `known_hosts` | host keys SSH (TOFU) | `host_port` (PK), `key_type`, `public_key`, `fingerprint`, `first_seen`, `last_seen` |
 | `jobs` | operações em background | `kind`, `status`, `target_type`, `target_id`, `params` (JSON), `result` (JSON), `error`, `attempts`, `created_at/started_at/finished_at` |
@@ -151,7 +152,7 @@ Ao remover um servidor, seus segredos são apagados na mesma transação.
   `Authorization: Bearer`, `token:`/`password:`/`client-key-data:`).
 - Cancelamento por contexto envia `SIGKILL` à sessão; código de saída ≠ 0 vira `ExitError`.
 
-### Padrões APT no Debian 13+ _(usados a partir da Fase 2)_
+### Padrões APT no Debian 13+
 ```
 DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" install …
 install -m 0755 -d /etc/apt/keyrings
@@ -245,9 +246,18 @@ escuta via `/proc/net/tcp*`, cgroup v2 + systemd). Requisitos por papel:
 
 O relatório (`pass | warn | fail` por item) fica no resultado do job e em `servers.last_check_report`.
 
+### Endpoints (Fase 2)
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/kubernetes/versions` | últimas 4 minors estáveis (`dl.k8s.io/release/stable-1.N.txt`, cache de 1 h) |
+| GET · POST | `/clusters` | listar · criar pelo wizard (`start: true` já dispara o bootstrap) |
+| GET · DELETE | `/clusters/{id}` | detalhe (nós, `hasKubeconfig`, job de bootstrap) · remover (desvincula servidores, apaga kubeconfig) |
+| POST | `/clusters/{id}/bootstrap` | inicia ou **retoma** o bootstrap (reexecuta o job falho/pausado; 409 se já estiver rodando) |
+| GET | `/clusters/{id}/kubeconfig` | download do `admin.conf` decifrado (auditado) |
+
 ### Endpoints previstos
-- _(Fase 2)_ `GET /kubernetes/versions` (versões estáveis de `pkgs.k8s.io`), `POST /clusters` (wizard),
-  `POST /clusters/{id}/bootstrap`, `POST /clusters/{id}/nodes` (scale-up), `DELETE /clusters/{id}/nodes/{name}`.
+- _(Fase 3)_ `POST /clusters/{id}/nodes` (scale-up), `DELETE /clusters/{id}/nodes/{name}`.
 - _(Fase 3)_ `/clusters/{id}/k8s/...` (overview, nodes + cordon/uncordon/drain, workloads, rede, storage, configmaps,
   secrets mascarados, eventos), WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
 - _(Fase 4)_ `POST /clusters/{id}/apply` (`dryRun=server`), `/clusters/{id}/helm/releases|repos|charts`.
@@ -255,16 +265,33 @@ O relatório (`pass | warn | fail` por item) fica no resultado do job e em `serv
 
 ---
 
-## 8. Desenho das próximas fases
+## 8. Bootstrap (Fase 2, `cluster.bootstrap`)
 
-### Fase 2 · Bootstrap (`cluster.bootstrap`)
-Etapas por nó (todas `StepOnce`, scripts idempotentes): `preflight` → `swap` (swapoff, `/etc/fstab`, mask de
-unidades `.swap`) → `kernel` (`/etc/modules-load.d/k8s.conf`: overlay, br_netfilter; `/etc/sysctl.d/k8s.conf`) →
-`containerd` (`SystemdCgroup = true`) → `k8s-repo` (keyring em `/etc/apt/keyrings`) → `k8s-packages`
-(versão exata + `apt-mark hold`) → `kubeadm init` no primeiro control plane (kube-vip opcional) → CNI (Cilium
-ou Calico) → metrics-server opcional → join dos control planes adicionais (`--certificate-key`) → join dos
-workers → remoção opcional do taint (single-node) → extração de `admin.conf` para o cofre → aguarda todos `Ready`.
-Tokens de join e certificate-key são registrados no `Redactor` da sessão.
+`bootstrap.Spec.Validate` recusa: nome fora de DNS label, minor < 1.31, CIDRs sobrepostos/pequenos, IPs de nós ou VIP
+dentro dos CIDRs, HA sem VIP, número par de control planes, servidores duplicados. Pipeline (`internal/ops/bootstrap.go`):
+
+1. **Preparação em paralelo** por nó (`connect` refaz a validação Debian 13+ a cada execução; demais etapas `StepOnce`):
+   `swap` (swapoff, `/etc/fstab`, `systemctl mask` das unidades `.swap`) → `kernel` (overlay, br_netfilter,
+   sysctl) → `containerd` (`SystemdCgroup = true`, pause image alinhada ao kubeadm) → `k8s-repo` (keyring em
+   `/etc/apt/keyrings`, `signed-by=`) → `k8s-packages` (versão exata + `apt-mark hold`) → `images` (só CPs).
+2. `init` no primeiro control plane (kube-vip em modo ARP como static pod, usando `super-admin.conf` no init e
+   `admin.conf` depois em `kube-vip-finalize`).
+3. `kubeconfig`: `admin.conf` e `ca.crt` lidos em modo `Quiet` (nunca vão ao log), kubeconfig cifrado no cofre.
+4. `cni`: Cilium via cilium-cli (binário com sha256 verificado) ou Calico via tigera-operator.
+5. `join-credentials` (sempre roda, recria token com TTL curto e reenvia certs para HA) → joins dos CPs **em série**
+   → joins dos workers em paralelo. Hash da CA calculado no Go.
+6. Opcionais: `untaint` (single-node ou opção marcada), `metrics-server`.
+7. `ready`: aguarda todos os nós `Ready` (`ReadyTimeout`), então o cluster vai para `ready`; erro → `failed`.
+
+Segredos (bootstrap token, certificate-key) são gerados no Go, registrados no `Redactor` de cada sessão e entregues
+ao kubeadm por process substitution (`--config <(cat <<'EOF' ...)`) dentro do script enviado via stdin: nunca em
+argv, nunca em disco. Versões fixadas em `internal/bootstrap/spec.go` (Cilium 1.20.4 / cilium-cli v0.20.2,
+Calico v3.32.3, metrics-server v0.8.1, kube-vip v1.3.1). Retomar um bootstrap pula as etapas `StepOnce` já concluídas.
+
+As configs geradas são validadas contra o kubeadm real quando `K8SFRONT_KUBEADM=/caminho/kubeadm` está definido
+em `go test ./internal/bootstrap/`.
+
+## 8b. Desenho das próximas fases
 
 ### Fase 3 · Gestão via client-go
 Kubeconfig decifrado em memória por cluster; informers para nós/eventos; drain com Eviction API (respeita PDB,

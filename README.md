@@ -21,7 +21,7 @@ Veja [ARCHITECTURE.md](ARCHITECTURE.md) para o desenho completo e [CLAUDE.md](CL
 ## Roadmap
 
 1. ✅ Fundação: monorepo, banco, cofre, SSH + sudo com validação de Debian 13+, streaming de logs
-2. Bootstrap com kubeadm + containerd + CNI e Wizard de Deploy
+2. ✅ Bootstrap com kubeadm + containerd + CNI e Wizard de Deploy
 3. client-go, dashboard, nós, workloads, rede, storage, logs e terminal web
 4. Central de deploy (formulário visual, Monaco com dry-run, Helm)
 5. Rolling upgrades de Kubernetes e do Debian, rolling reboot, circuit breaker, docker-compose
