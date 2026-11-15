@@ -11,6 +11,8 @@
 #   K8SFRONT_PORT      HTTP port (default 8080)
 #   K8SFRONT_LISTEN    bind address (default 0.0.0.0)
 #   K8SFRONT_REPO      GitHub repository (default efbecker/k8sfront)
+#   K8SFRONT_TMPDIR    scratch directory on disk (default $TMPDIR, else /var/tmp). /tmp is avoided on
+#                      purpose: Debian 13 mounts it as a small tmpfs, too small for a source build.
 set -Eeuo pipefail
 
 REPO="${K8SFRONT_REPO:-efbecker/k8sfront}"
@@ -26,6 +28,9 @@ ENV_FILE="$CONF_DIR/k8sfront.env"
 UNIT=/etc/systemd/system/k8sfront.service
 SVC_USER=k8sfront
 NODE_MIN=20.19.0
+# Free space needed in the scratch directory (MiB): Go toolchain + build cache + node_modules.
+NEED_SOURCE_MB=3072
+NEED_RELEASE_MB=300
 
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8
 APT=(apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
@@ -37,7 +42,8 @@ die()  { trap - ERR; printf '%sERRO:%s %s\n' "$B$R" "$N" "$*" >&2; exit 1; }
 trap 'die "falhou na linha $LINENO: $BASH_COMMAND"' ERR
 
 WORK=""
-cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; }
+# Root ignores the read-only bits Go puts on the module cache, so rm -rf removes everything.
+cleanup() { if [ -n "$WORK" ] && [ -d "$WORK" ]; then rm -rf "$WORK"; fi; }
 trap cleanup EXIT
 
 # --- pre-checks ---------------------------------------------------------------
@@ -72,9 +78,33 @@ log "Instalando dependências básicas"
 "${APT[@]}" update -qq
 "${APT[@]}" install -qq --no-install-recommends ca-certificates curl tar jq >/dev/null
 
-WORK="$(mktemp -d)"
+# --- scratch directory -----------------------------------------------------------
+# Everything temporary (downloads, sources, Go toolchain/cache, npm cache, the temp dirs of go and
+# node) lives under one directory on disk and is removed on exit, success or failure.
+
+BUILD_BASE="${K8SFRONT_TMPDIR:-${TMPDIR:-/var/tmp}}"
+case "$BUILD_BASE" in /*) ;; *) die "K8SFRONT_TMPDIR/TMPDIR precisa ser um caminho absoluto: $BUILD_BASE";; esac
+mkdir -p "$BUILD_BASE" || die "não consegui criar o diretório temporário $BUILD_BASE"
+
+free_mb() { df -Pm "$1" 2>/dev/null | awk 'NR==2 {print $4}'; }
+
+# check_space DIR MiB WHAT
+check_space() {
+  local avail
+  avail="$(free_mb "$1")"
+  [ -n "$avail" ] || { warn "não consegui medir o espaço livre em $1"; return 0; }
+  if [ "$avail" -lt "$2" ]; then
+    die "espaço insuficiente em $1 para $3: livres ${avail} MiB, necessários ~${2} MiB.
+      Libere espaço ou aponte para outro disco, por exemplo:
+        curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | sudo K8SFRONT_TMPDIR=/caminho/com/espaco bash"
+  fi
+}
+
+WORK="$(mktemp -d -p "$BUILD_BASE" k8sfront-install.XXXXXX)"
 STAGE="$WORK/stage"
-mkdir -p "$STAGE/bin" "$STAGE/web"
+mkdir -p "$STAGE/bin" "$STAGE/web" "$WORK/tmp"
+# Child processes (go, npm, node, tar) use this instead of /tmp.
+export TMPDIR="$WORK/tmp" GOTMPDIR="$WORK/tmp" npm_config_cache="$WORK/npm-cache"
 
 gh_api() { curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO/$1"; }
 
@@ -99,6 +129,7 @@ find_release() {
 
 # Runs outside any `if`/`||` so that `set -e` applies to every command.
 install_release() {
+  check_space "$BUILD_BASE" "$NEED_RELEASE_MB" "baixar a release"
   log "Baixando release $RELEASE_TAG"
   curl -fsSL -o "$WORK/$RELEASE_ASSET" "$RELEASE_URL"
   curl -fsSL -o "$WORK/SHA256SUMS" "$RELEASE_SUMS"
@@ -150,6 +181,8 @@ build_source() {
   local ref="$VERSION"
   [ "$ref" = latest ] && ref=main
   log "Compilando a partir do código-fonte ($REPO@$ref)"
+  check_space "$BUILD_BASE" "$NEED_SOURCE_MB" "compilar do código-fonte"
+  log "Diretório de build: $WORK"
   "${APT[@]}" install -qq --no-install-recommends git >/dev/null
   SRC="$WORK/src"
   if ! git clone -q --depth 1 --branch "$ref" "https://github.com/$REPO.git" "$SRC" 2>/dev/null; then
@@ -164,7 +197,7 @@ build_source() {
   log "Build do frontend (npm ci + vite build)"
   (cd "$SRC" && npm ci --no-audit --no-fund --loglevel=error && npm run build -w apps/web --silent) >/dev/null
   log "Build do control plane (Go, CGO desabilitado)"
-  (cd "$SRC/apps/api" && GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOCACHE="$WORK/gocache" GOPATH="$WORK/gopath" \
+  (cd "$SRC/apps/api" && GOTOOLCHAIN=local GOFLAGS="-mod=readonly -modcacherw" GOCACHE="$WORK/gocache" GOPATH="$WORK/gopath" \
     CGO_ENABLED=0 "$GO" build -trimpath \
     -ldflags "-s -w -X github.com/efbecker/k8sfront/apps/api/internal/api.Version=$INSTALLED_VERSION" \
     -o "$STAGE/bin/k8sfront-api" ./cmd/k8sfront-api)
@@ -186,6 +219,7 @@ if [ "$MODE" = release ]; then install_release; else build_source; fi
 
 # --- install ---------------------------------------------------------------------
 
+check_space "$(dirname "$PREFIX")" 200 "instalar em $PREFIX"
 log "Instalando em $PREFIX"
 id -u "$SVC_USER" >/dev/null 2>&1 ||
   useradd --system --home-dir "$DATA_DIR" --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
