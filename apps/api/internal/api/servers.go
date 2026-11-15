@@ -72,6 +72,7 @@ func str(p *string) string {
 // apply validates in and applies it to srv. Secrets are encrypted and stored;
 // replaced secret IDs are returned for deletion after the row is saved.
 func (s *Server) apply(ctx context.Context, srv *store.Server, in *serverInput, creating bool) (obsolete []string, err error) {
+	prevHost, prevPort, prevUser := srv.Host, srv.Port, srv.SSHUser
 	if in.Name != nil {
 		srv.Name = strings.TrimSpace(*in.Name)
 	}
@@ -184,9 +185,16 @@ func (s *Server) apply(ctx context.Context, srv *store.Server, in *serverInput, 
 			return nil, err
 		}
 	}
-	// Any change to how we connect invalidates the detected sudo mode.
-	if in.SSHUser != nil || in.SudoPassword != nil || in.ClearSudoPassword || authChanged {
+	// Any change to how we connect invalidates the detected sudo mode and the
+	// last pre-flight result: the operator must test the server again.
+	connChanged := authChanged || len(obsolete) > 0 ||
+		srv.Host != prevHost || srv.Port != prevPort || srv.SSHUser != prevUser ||
+		str(in.PrivateKey) != "" || str(in.Password) != "" || str(in.SudoPassword) != "" || in.ClearSudoPassword
+	if connChanged && !creating {
 		srv.SudoMode = store.SudoUnknown
+		srv.LastCheckAt = nil
+		srv.LastCheckStatus = ""
+		srv.LastCheckReport = nil
 	}
 	return obsolete, nil
 }
@@ -284,6 +292,15 @@ func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteServer(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	srv, err := s.Store.GetServer(r.Context(), id)
+	if err != nil {
+		s.storeError(w, err)
+		return
+	}
+	if srv.ClusterID != nil {
+		writeError(w, http.StatusConflict, "conflict", "server belongs to a cluster; remove it from the cluster first")
+		return
+	}
 	if err := s.Store.DeleteServer(r.Context(), id); err != nil {
 		s.storeError(w, err)
 		return

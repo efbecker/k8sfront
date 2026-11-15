@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, Loader2, Network, Plus, Rocket, Server as ServerIcon, Stethoscope } from "lucide-react";
-import { api, isFinal, type CNI, type ClusterInput, type Topology } from "@/lib/api";
+import { Check, ChevronLeft, ChevronRight, Loader2, Network, Pencil, Plus, Rocket, Server as ServerIcon, Stethoscope, Trash2 } from "lucide-react";
+import { api, isFinal, type CNI, type ClusterInput, type Server, type Topology } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useJobStream } from "@/hooks/useJobStream";
 import { PageHeader } from "@/components/layout/AppShell";
@@ -10,6 +10,7 @@ import { CheckBadge, JobStatusBadge, sudoLabel } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ServerFormDialog } from "./ServerForm";
@@ -70,6 +71,8 @@ export function ClusterWizardPage() {
   const [vipIface, setVipIface] = useState("");
   const [roles, setRoles] = useState<Record<string, Role | "">>({});
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Server>();
+  const [removing, setRemoving] = useState<Server>();
   const [testJob, setTestJob] = useState<string>();
 
   const versions = useQuery({ queryKey: ["k8s-versions"], queryFn: api.kubernetesVersions, staleTime: 3600_000, retry: 1 });
@@ -88,6 +91,19 @@ export function ClusterWizardPage() {
   useEffect(() => {
     if (liveTest && isFinal(liveTest.status)) qc.invalidateQueries({ queryKey: ["servers"] });
   }, [liveTest, qc]);
+
+  const remove = useMutation({
+    mutationFn: (s: Server) => api.deleteServer(s.id),
+    onSuccess: (_, s) => {
+      setRoles((r) => {
+        const next = { ...r };
+        delete next[s.id];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: ["servers"] });
+      setRemoving(undefined);
+    },
+  });
 
   const setRole = (id: string, role: Role | "") => {
     setRoles((r) => {
@@ -275,7 +291,7 @@ export function ClusterWizardPage() {
           <CardHeader>
             <CardTitle>Servidores</CardTitle>
             <CardDescription>
-              Escolha o papel de cada servidor livre. O primeiro Control Plane executa o <code>kubeadm init</code>.
+              Escolha o papel de cada servidor livre; use os ícones para editar ou excluir. O primeiro Control Plane executa o <code>kubeadm init</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -316,6 +332,24 @@ export function ClusterWizardPage() {
                       <option value="control-plane">Control Plane</option>
                       {topology === "multi-node" && <option value="worker">Worker</option>}
                     </NativeSelect>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" title="Editar servidor" aria-label={`Editar ${s.name}`} onClick={() => setEditing(s)}>
+                        <Pencil />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive"
+                        title="Excluir servidor"
+                        aria-label={`Excluir ${s.name}`}
+                        onClick={() => {
+                          remove.reset();
+                          setRemoving(s);
+                        }}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -400,6 +434,28 @@ export function ClusterWizardPage() {
           onSaved={(s) => setRole(s.id, s.role === "worker" && topology === "multi-node" ? "worker" : s.role === "control-plane" ? "control-plane" : "")}
         />
       )}
+      {editing && <ServerFormDialog key={editing.id} open server={editing} onOpenChange={(o) => !o && setEditing(undefined)} />}
+      <Dialog open={!!removing} onOpenChange={(o) => !o && !remove.isPending && setRemoving(undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir {removing?.name}?</DialogTitle>
+            <DialogDescription>
+              O servidor {removing && <code>{removing.sshUser}@{removing.host}:{removing.port}</code>} será removido do inventário e as credenciais cifradas
+              serão apagadas. Nada é alterado no próprio servidor.
+            </DialogDescription>
+          </DialogHeader>
+          {remove.error && <p className="text-destructive text-sm">{remove.error.message}</p>}
+          <DialogFooter>
+            <Button variant="outline" disabled={remove.isPending} onClick={() => setRemoving(undefined)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" disabled={remove.isPending} onClick={() => removing && remove.mutate(removing)}>
+              {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
