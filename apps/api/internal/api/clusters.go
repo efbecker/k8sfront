@@ -243,6 +243,9 @@ func (s *Server) deleteCluster(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
+	if s.Kube != nil {
+		s.Kube.Forget(c.ID)
+	}
 	s.audit(r, "cluster.delete", "cluster", c.ID, map[string]string{"name": c.Name})
 	w.WriteHeader(http.StatusNoContent)
 }

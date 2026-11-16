@@ -20,6 +20,7 @@ import (
 	"github.com/efbecker/k8sfront/apps/api/internal/config"
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
 	"github.com/efbecker/k8sfront/apps/api/internal/k8sver"
+	"github.com/efbecker/k8sfront/apps/api/internal/kube"
 	"github.com/efbecker/k8sfront/apps/api/internal/ops"
 	"github.com/efbecker/k8sfront/apps/api/internal/remote"
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
@@ -85,10 +86,14 @@ func run() error {
 		return fmt.Errorf("start job engine: %w", err)
 	}
 
+	kubeMgr := kube.NewManager(db, sec, logger)
+	defer kubeMgr.Close()
+
 	srv := &api.Server{
 		Store: db, Secrets: sec, Engine: engine, Connector: conn, Log: logger,
 		Auth:           api.NewAuth(adminToken, key, cfg.SessionTTL, cfg.SecureCookies),
 		Versions:       k8sver.NewFetcher(),
+		Kube:           kubeMgr,
 		WebDir:         cfg.WebDir,
 		AllowedOrigins: cfg.AllowedOrigins,
 	}

@@ -28,9 +28,9 @@ ENV_FILE="$CONF_DIR/k8sfront.env"
 UNIT=/etc/systemd/system/k8sfront.service
 SVC_USER=k8sfront
 NODE_MIN=20.19.0
-# Free space needed in the scratch directory (MiB). A source build peaks at ~1.1 GiB
+# Free space needed in the scratch directory (MiB). A source build peaks at ~2.2 GiB
 # (Go toolchain, module and build caches, node_modules, npm cache).
-NEED_SOURCE_MB=2048
+NEED_SOURCE_MB=3072
 NEED_RELEASE_MB=300
 
 export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8

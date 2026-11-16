@@ -15,6 +15,7 @@ import (
 
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
 	"github.com/efbecker/k8sfront/apps/api/internal/k8sver"
+	"github.com/efbecker/k8sfront/apps/api/internal/kube"
 	"github.com/efbecker/k8sfront/apps/api/internal/remote"
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
@@ -31,6 +32,7 @@ type Server struct {
 	Connector      *remote.Connector
 	Auth           *Auth
 	Versions       *k8sver.Fetcher
+	Kube           *kube.Manager
 	Log            *slog.Logger
 	WebDir         string
 	AllowedOrigins []string
@@ -71,6 +73,11 @@ func (s *Server) Handler() http.Handler {
 	priv("DELETE /api/v1/clusters/{id}", s.deleteCluster)
 	priv("POST /api/v1/clusters/{id}/bootstrap", s.bootstrapCluster)
 	priv("GET /api/v1/clusters/{id}/kubeconfig", s.downloadKubeconfig)
+	priv("GET /api/v1/clusters/{id}/k8s/overview", s.kubeOverview)
+	priv("GET /api/v1/clusters/{id}/k8s/namespaces", s.kubeNamespaces)
+	priv("GET /api/v1/clusters/{id}/k8s/workloads", s.kubeWorkloads)
+	priv("GET /api/v1/clusters/{id}/k8s/network", s.kubeNetwork)
+	priv("GET /api/v1/clusters/{id}/k8s/topology/stream", s.topologyStream)
 
 	priv("GET /api/v1/audit", s.listAudit)
 

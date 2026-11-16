@@ -3,7 +3,7 @@
 Plataforma web para **provisionamento (bootstrap), gestão diária, deploy de aplicações e rolling upgrades**
 de clusters Kubernetes que rodam exclusivamente sobre **Debian 13 (Trixie) ou superior**.
 
-Status: **Fases 1 e 2 entregues** (fundação + bootstrap com Wizard de Deploy). As seções marcadas com _(Fase N)_ descrevem o desenho alvo das fases seguintes.
+Status: **Fases 1 e 2 entregues** (fundação + bootstrap com Wizard de Deploy); **Fase 3 em andamento** (Visão Geral, Topologia ao vivo, Workloads e Rede & Storage em modo leitura). As seções marcadas com _(Fase N)_ descrevem o desenho alvo das fases seguintes.
 
 ---
 
@@ -256,10 +256,28 @@ O relatório (`pass | warn | fail` por item) fica no resultado do job e em `serv
 | POST | `/clusters/{id}/bootstrap` | inicia ou **retoma** o bootstrap (reexecuta o job falho/pausado; 409 se já estiver rodando) |
 | GET | `/clusters/{id}/kubeconfig` | download do `admin.conf` decifrado (auditado) |
 
+### Endpoints (Fase 3, leitura)
+
+`internal/kube` decifra o kubeconfig do cofre só para montar o `rest.Config` (os bytes são zerados em seguida) e
+mantém um client-go por cluster, refeito quando o segredo muda. As respostas usam visões enxutas (`views.go`):
+objetos crus nunca vão ao navegador (env de pods pode ter valores literais) e Secrets nunca são lidos.
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/clusters/{id}/k8s/overview` | versão, nós com requests/uso (metrics-server se houver), pods por fase, control plane, add-ons, eventos Warning |
+| GET | `/clusters/{id}/k8s/namespaces` | nomes |
+| GET | `/clusters/{id}/k8s/workloads?namespace=` | Deployments, StatefulSets, DaemonSets e pods |
+| GET | `/clusters/{id}/k8s/network?namespace=` | Services, Ingresses, PVCs, PVs, StorageClasses, contagem de NetworkPolicies |
+| WS | `/clusters/{id}/k8s/topology/stream` | `status` → `snapshot` (nós, pods, services) → `upsert`/`delete` em tempo real |
+
+Erros: 409 `not_ready` sem kubeconfig, 502 `upstream` se a API do cluster não responde, 403 se recusar a credencial.
+A topologia usa informers compartilhados que só rodam enquanto há alguém assistindo (+2 min de folga); assinante
+lento é desconectado com `1013` e o cliente reconecta recebendo um snapshot novo. Um `/readyz` a cada 15 s alterna
+o estado entre `live` e `error`.
+
 ### Endpoints previstos
 - _(Fase 3)_ `POST /clusters/{id}/nodes` (scale-up), `DELETE /clusters/{id}/nodes/{name}`.
-- _(Fase 3)_ `/clusters/{id}/k8s/...` (overview, nodes + cordon/uncordon/drain, workloads, rede, storage, configmaps,
-  secrets mascarados, eventos), WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
+- _(Fase 3)_ cordon/uncordon/drain, configmaps, secrets mascarados, WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
 - _(Fase 4)_ `POST /clusters/{id}/apply` (`dryRun=server`), `/clusters/{id}/helm/releases|repos|charts`.
 - _(Fase 5)_ `/clusters/{id}/upgrades/plan|start`, `/servers/{id}/os-updates`, `/clusters/{id}/rolling-reboot`.
 

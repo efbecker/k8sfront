@@ -176,6 +176,131 @@ export interface ClusterInput {
   start: boolean;
 }
 
+// --- Kubernetes (phase 3) -------------------------------------------------------
+
+export interface K8sNode {
+  uid: string;
+  name: string;
+  roles: string[] | null;
+  ready: boolean;
+  unschedulable: boolean;
+  conditions?: string[];
+  kubeletVersion: string;
+  internalIP: string;
+  osImage: string;
+  kernelVersion: string;
+  containerRuntime: string;
+  architecture: string;
+  podCIDR?: string;
+  cpuMillis: number;
+  memoryBytes: number;
+  podsCapacity: number;
+  taints?: string[];
+  labels?: Record<string, string>;
+  created: string;
+}
+
+export interface K8sPod {
+  uid: string;
+  name: string;
+  namespace: string;
+  node: string;
+  phase: string;
+  reason?: string;
+  ip?: string;
+  ready: number;
+  containers: number;
+  restarts: number;
+  images: string[] | null;
+  ownerKind?: string;
+  ownerName?: string;
+  labels?: Record<string, string>;
+  qosClass?: string;
+  created: string;
+}
+
+export interface K8sService {
+  uid: string;
+  name: string;
+  namespace: string;
+  type: string;
+  clusterIP: string;
+  externalIPs?: string[];
+  ports: string[];
+  selector?: Record<string, string>;
+  created: string;
+}
+
+export interface NodeUsage extends K8sNode {
+  pods: number;
+  cpuRequestedMillis: number;
+  memoryRequestedBytes: number;
+  cpuUsedMillis: number | null;
+  memoryUsedBytes: number | null;
+}
+
+export interface ResourceTotals {
+  allocatable: number;
+  requested: number;
+  used: number | null;
+}
+
+export interface K8sWorkload {
+  kind: "Deployment" | "StatefulSet" | "DaemonSet";
+  name: string;
+  namespace: string;
+  desired: number;
+  ready: number;
+  updated: number;
+  available: number;
+  images: string[];
+  created: string;
+}
+
+export interface K8sEvent {
+  type: string;
+  reason: string;
+  message: string;
+  kind: string;
+  name: string;
+  namespace: string;
+  count: number;
+  last: string;
+}
+
+export interface ClusterOverview {
+  version: string;
+  platform: string;
+  nodes: NodeUsage[];
+  nodesReady: number;
+  pods: { total: number; running: number; pending: number; succeeded: number; failed: number; problem: number };
+  namespaces: number;
+  services: number;
+  deployments: number;
+  deploymentsReady: number;
+  cpu: ResourceTotals;
+  memory: ResourceTotals;
+  metricsAvailable: boolean;
+  controlPlane: { name: string; node: string; ready: boolean; restarts: number }[];
+  system: K8sWorkload[];
+  events: K8sEvent[];
+  collectedAt: string;
+}
+
+export interface WorkloadList {
+  workloads: K8sWorkload[];
+  pods: K8sPod[];
+}
+
+export interface NetworkList {
+  services: K8sService[];
+  ingresses: { name: string; namespace: string; class: string; hosts: string[]; address: string[]; tls: boolean; created: string }[];
+  networkPolicies: number;
+  pvcs: { name: string; namespace: string; status: string; volume: string; capacity: string; storageClass: string; accessModes: string[]; created: string }[];
+  pvs: { name: string; status: string; capacity: string; claim: string; storageClass: string; reclaimPolicy: string; created: string }[];
+  storageClasses: { name: string; provisioner: string; default: boolean; reclaimPolicy: string; bindingMode: string }[];
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -242,6 +367,13 @@ export const api = {
   deleteCluster: (id: string) => request<void>("DELETE", `/clusters/${id}`),
   bootstrapCluster: (id: string) => request<Job>("POST", `/clusters/${id}/bootstrap`),
   kubeconfigUrl: (id: string) => `/api/v1/clusters/${id}/kubeconfig`,
+
+  overview: (id: string) => request<ClusterOverview>("GET", `/clusters/${id}/k8s/overview`),
+  namespaces: (id: string) => request<string[]>("GET", `/clusters/${id}/k8s/namespaces`),
+  workloads: (id: string, ns?: string) =>
+    request<WorkloadList>("GET", `/clusters/${id}/k8s/workloads${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
+  network: (id: string, ns?: string) =>
+    request<NetworkList>("GET", `/clusters/${id}/k8s/network${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
 };
 
 export const isFinal = (s: JobStatus) => s === "succeeded" || s === "failed" || s === "cancelled" || s === "paused";

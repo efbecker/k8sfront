@@ -15,6 +15,11 @@ import { AuditPage } from "@/pages/Audit";
 import { ClustersPage, HomeRedirect } from "@/pages/Clusters";
 import { ClusterDetailPage } from "@/pages/ClusterDetail";
 import { ClusterWizardPage } from "@/pages/ClusterWizard";
+import { ClusterOverviewPage } from "@/pages/ClusterOverview";
+import { ClusterTopologyPage } from "@/pages/ClusterTopology";
+import { ClusterWorkloadsPage } from "@/pages/ClusterWorkloads";
+import { ClusterNetworkPage } from "@/pages/ClusterNetwork";
+import { ActiveClusterRedirect } from "@/components/layout/AppShell";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -56,6 +61,13 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/clusters" element={<ClustersPage />} />
                 <Route path="/clusters/new" element={<ClusterWizardPage />} />
                 <Route path="/clusters/:id" element={<ClusterDetailPage />} />
+                <Route path="/clusters/:id/overview" element={<ClusterOverviewPage />} />
+                <Route path="/clusters/:id/topology" element={<ClusterTopologyPage />} />
+                <Route path="/clusters/:id/workloads" element={<ClusterWorkloadsPage />} />
+                <Route path="/clusters/:id/network" element={<ClusterNetworkPage />} />
+                {["overview", "topology", "workloads", "network"].map((p) => (
+                  <Route key={p} path={`/${p}`} element={<ActiveClusterRedirect page={p} />} />
+                ))}
                 <Route path="/servers" element={<ServersPage />} />
                 <Route path="/servers/:id" element={<ServerDetailPage />} />
                 <Route path="/jobs" element={<JobsPage />} />

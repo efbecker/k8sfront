@@ -32,7 +32,7 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 
 ## Convenções Go (`apps/api`)
 
-- Go 1.26, apenas stdlib + dependências já presentes (`x/crypto/ssh`, `modernc.org/sqlite`, `coder/websocket`, `google/uuid`; `client-go` entra na Fase 3). Sem CGO.
+- Go 1.26, apenas stdlib + dependências já presentes (`x/crypto/ssh`, `modernc.org/sqlite`, `coder/websocket`, `google/uuid`, `k8s.io/client-go` em `internal/kube`). Sem CGO.
 - Roteamento com `net/http.ServeMux` (padrões `"GET /api/v1/x/{id}"`). Logs estruturados com `log/slog`.
 - Persistência só através da interface `store.Store`. SQL específico de SQLite fica em `internal/store/sqlite`; nada fora desse pacote importa o driver. Novas tabelas = novo arquivo `migrations/NNNN_nome.sql` (nunca edite uma migration já publicada).
 - Operações longas são **jobs** (`internal/jobs`), nunca trabalho dentro do handler HTTP. Handlers de job ficam em `internal/ops`, são idempotentes e usam `jc.StepOnce` para etapas que não devem repetir num retry.

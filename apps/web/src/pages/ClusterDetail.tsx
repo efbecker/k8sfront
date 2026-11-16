@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, Loader2, Play, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, LayoutDashboard, Loader2, Play, RotateCw, Share2, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
@@ -63,6 +63,20 @@ export function ClusterDetailPage() {
                   <Download /> kubeconfig
                 </a>
               </Button>
+            )}
+            {c.hasKubeconfig && c.status === "ready" && (
+              <>
+                <Button variant="outline" asChild>
+                  <Link to={`/clusters/${c.id}/topology`}>
+                    <Share2 /> Topologia ao vivo
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link to={`/clusters/${c.id}/overview`}>
+                    <LayoutDashboard /> Visão Geral
+                  </Link>
+                </Button>
+              </>
             )}
             {(c.status === "draft" || c.status === "failed") && !running && (
               <Button

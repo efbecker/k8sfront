@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/efbecker/k8sfront/apps/api/internal/jobs"
+	"github.com/efbecker/k8sfront/apps/api/internal/kube"
 	"github.com/efbecker/k8sfront/apps/api/internal/ops"
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
@@ -24,6 +25,12 @@ import (
 const testToken = "unit-test-admin-token"
 
 func newTestServer(t *testing.T) (*httptest.Server, *sqlite.DB) {
+	t.Helper()
+	ts, db, _ := newTestServerFull(t)
+	return ts, db
+}
+
+func newTestServerFull(t *testing.T) (*httptest.Server, *sqlite.DB, *Server) {
 	t.Helper()
 	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
@@ -37,10 +44,12 @@ func newTestServer(t *testing.T) (*httptest.Server, *sqlite.DB) {
 	// these API-level tests need.
 	engine := jobs.New(db, jobs.NewHub(db, logger), logger, 1)
 	(&ops.Ops{Store: db}).Register(engine)
-	s := &Server{Store: db, Secrets: secrets.NewManager(db, v), Engine: engine, Log: logger, Auth: NewAuth(testToken, key, time.Hour, false)}
+	sec := secrets.NewManager(db, v)
+	s := &Server{Store: db, Secrets: sec, Engine: engine, Log: logger, Auth: NewAuth(testToken, key, time.Hour, false),
+		Kube: kube.NewManager(db, sec, logger)}
 	ts := httptest.NewServer(s.Handler())
-	t.Cleanup(func() { ts.Close(); db.Close() })
-	return ts, db
+	t.Cleanup(func() { ts.Close(); s.Kube.Close(); db.Close() })
+	return ts, db, s
 }
 
 func call(t *testing.T, ts *httptest.Server, method, path string, body any, out any) int {
