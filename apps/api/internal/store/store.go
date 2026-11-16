@@ -51,6 +51,7 @@ const (
 	SecretSSHPassword   SecretKind = "ssh_password"
 	SecretSudoPassword  SecretKind = "sudo_password"
 	SecretKubeconfig    SecretKind = "kubeconfig"
+	SecretHelmValues    SecretKind = "helm_values" // values of a pending Helm job (deleted when it succeeds)
 )
 
 // Secret is an encrypted blob. Plaintext never lives in this struct.

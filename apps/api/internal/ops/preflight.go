@@ -44,6 +44,8 @@ type Ops struct {
 	ReadyTimeout time.Duration
 	// PollInterval is the Ready polling interval (default 10s).
 	PollInterval time.Duration
+	// RebootTimeout bounds the wait for a rebooted node to answer SSH (default 15m).
+	RebootTimeout time.Duration
 }
 
 // Runner is an open, validated session on a node.
@@ -68,6 +70,15 @@ func (o *Ops) open(ctx context.Context, s *store.Server, hooks remote.Hooks) (Ru
 func (o *Ops) Register(e *jobs.Engine) {
 	e.Register(KindPreflight, o.preflight)
 	e.Register(KindBootstrap, o.bootstrap)
+	e.Register(KindUpgrade, o.upgrade)
+	e.Register(KindNodeAdd, o.nodeAdd)
+	e.Register(KindNodeRemove, o.nodeRemove)
+	e.Register(KindNodeDrain, o.nodeDrain)
+	e.Register(KindOSCheck, o.osCheck)
+	e.Register(KindOSUpdate, o.osUpdate)
+	e.Register(KindRollingReboot, o.rollingReboot)
+	e.Register(KindCerts, o.certs)
+	e.Register(KindHelm, o.helm)
 }
 
 func (o *Ops) preflight(ctx context.Context, jc *jobs.Context) error {

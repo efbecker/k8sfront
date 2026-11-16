@@ -29,6 +29,13 @@ type Fetcher struct {
 	mu      sync.Mutex
 	cached  []Release
 	fetched time.Time
+	minors  map[string]cachedMarker
+}
+
+type cachedMarker struct {
+	v   Version
+	at  time.Time
+	err error
 }
 
 // NewFetcher returns a Fetcher with defaults.
@@ -104,4 +111,35 @@ func (f *Fetcher) Stable(ctx context.Context) ([]Release, error) {
 	})
 	f.cached, f.fetched = out, time.Now()
 	return out, nil
+}
+
+// LatestPatch returns the newest stable patch of major.minor
+// (stable-MAJOR.MINOR.txt), cached for TTL. Used by the upgrade planner to
+// walk minors older than the supported window too.
+func (f *Fetcher) LatestPatch(ctx context.Context, major, minor int) (Version, error) {
+	name := fmt.Sprintf("stable-%d.%d.txt", major, minor)
+	ttl := f.TTL
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	f.mu.Lock()
+	if c, ok := f.minors[name]; ok && time.Since(c.at) < ttl {
+		f.mu.Unlock()
+		return c.v, c.err
+	}
+	f.mu.Unlock()
+	v, err := f.marker(ctx, name)
+	if err == nil && (v.Major != major || v.Minor != minor) {
+		err = fmt.Errorf("%s: unexpected version %s", name, v)
+	}
+	if ctx.Err() != nil {
+		return Version{}, ctx.Err()
+	}
+	f.mu.Lock()
+	if f.minors == nil {
+		f.minors = map[string]cachedMarker{}
+	}
+	f.minors[name] = cachedMarker{v: v, at: time.Now(), err: err}
+	f.mu.Unlock()
+	return v, err
 }

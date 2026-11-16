@@ -78,6 +78,26 @@ func (s *Server) Handler() http.Handler {
 	priv("GET /api/v1/clusters/{id}/k8s/workloads", s.kubeWorkloads)
 	priv("GET /api/v1/clusters/{id}/k8s/network", s.kubeNetwork)
 	priv("GET /api/v1/clusters/{id}/k8s/topology/stream", s.topologyStream)
+	priv("POST /api/v1/clusters/{id}/k8s/nodes/{name}/cordon", s.cordonNode)
+	priv("POST /api/v1/clusters/{id}/k8s/nodes/{name}/uncordon", s.uncordonNode)
+	priv("POST /api/v1/clusters/{id}/k8s/nodes/{name}/drain", s.drainNode)
+
+	// Phase 4: deploy center.
+	priv("POST /api/v1/deploy/render", s.renderApp)
+	priv("POST /api/v1/clusters/{id}/deploy/app", s.deployApp)
+	priv("POST /api/v1/clusters/{id}/apply", s.applyManifest)
+	priv("GET /api/v1/clusters/{id}/helm/releases", s.helmReleases)
+	priv("POST /api/v1/clusters/{id}/helm", s.helmJob)
+
+	// Phase 5: updates & lifecycle.
+	priv("GET /api/v1/clusters/{id}/upgrades/plan", s.upgradePlan)
+	priv("POST /api/v1/clusters/{id}/upgrades", s.startUpgrade)
+	priv("POST /api/v1/clusters/{id}/nodes", s.addNode)
+	priv("DELETE /api/v1/clusters/{id}/nodes/{serverId}", s.removeNode)
+	priv("POST /api/v1/clusters/{id}/os-updates/check", s.osCheck)
+	priv("POST /api/v1/clusters/{id}/os-updates", s.osUpdate)
+	priv("POST /api/v1/clusters/{id}/rolling-reboot", s.rollingReboot)
+	priv("POST /api/v1/clusters/{id}/certs", s.certsJob)
 
 	priv("GET /api/v1/audit", s.listAudit)
 

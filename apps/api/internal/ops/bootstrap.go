@@ -70,12 +70,13 @@ func SpecFor(cl *store.Cluster, members []store.Server) (*bootstrap.Spec, error)
 }
 
 type bootstrapRun struct {
-	o     *Ops
-	jc    *jobs.Context
-	spec  *bootstrap.Spec
-	sec   bootstrap.JoinSecrets
-	mu    sync.Mutex
-	nodes map[string]Runner
+	o       *Ops
+	jc      *jobs.Context
+	spec    *bootstrap.Spec
+	sec     bootstrap.JoinSecrets
+	mu      sync.Mutex
+	nodes   map[string]Runner
+	servers map[string]*store.Server
 }
 
 func (b *bootstrapRun) runner(id string) Runner {
@@ -88,7 +89,10 @@ func (b *bootstrapRun) runner(id string) Runner {
 func (b *bootstrapRun) exec(ctx context.Context, step *store.JobStep, n bootstrap.Node, script string) error {
 	r := b.runner(n.ID)
 	if r == nil {
-		return fmt.Errorf("no session to %s", n.Name)
+		if err := b.connect(ctx, n); err != nil {
+			return err
+		}
+		r = b.runner(n.ID)
 	}
 	id := n.ID
 	_, err := r.Run(ctx, script, sshx.RunOptions{Sudo: true}, b.jc.Sink(step, &id))
@@ -283,36 +287,69 @@ func (b *bootstrapRun) parallel(ctx context.Context, nodes []bootstrap.Node, fn 
 }
 
 func (b *bootstrapRun) prepareAll(ctx context.Context) error {
+	return b.prepare(ctx, allNodes(b.spec))
+}
+
+// server returns the stored server of a node (cached).
+func (b *bootstrapRun) server(ctx context.Context, id string) (*store.Server, error) {
+	b.mu.Lock()
+	s, ok := b.servers[id]
+	b.mu.Unlock()
+	if ok {
+		return s, nil
+	}
+	s, err := b.o.Store.GetServer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	b.mu.Lock()
+	if b.servers == nil {
+		b.servers = map[string]*store.Server{}
+	}
+	b.servers[id] = s
+	b.mu.Unlock()
+	return s, nil
+}
+
+// connect opens (once per job attempt) a validated session to the node:
+// SSH + host key, Debian 13+ and sudo, recorded as a "connect" step.
+func (b *bootstrapRun) connect(ctx context.Context, n bootstrap.Node) error {
+	if b.runner(n.ID) != nil {
+		return nil
+	}
+	srv, err := b.server(ctx, n.ID)
+	if err != nil {
+		return err
+	}
+	id := n.ID
+	return b.jc.Step(ctx, "connect", n.Name+": SSH, Debian 13+ e sudo", &id, func(ctx context.Context, _ *store.JobStep) error {
+		r, err := b.o.open(ctx, srv, remote.Hooks{After: func(stage remote.Stage, detail string, err error) {
+			if err == nil && detail != "" {
+				b.jc.Logf(&id, "  %s", detail)
+			}
+		}})
+		if err != nil {
+			return err
+		}
+		if b.sec.Token != "" {
+			r.Redactor().Add(b.sec.Token, b.sec.CertificateKey)
+		}
+		b.mu.Lock()
+		b.nodes[n.ID] = r
+		b.mu.Unlock()
+		return nil
+	})
+}
+
+// prepare connects to each node and runs the idempotent preparation steps
+// (swap, kernel, containerd, repository, packages, CP images) in parallel.
+func (b *bootstrapRun) prepare(ctx context.Context, nodes []bootstrap.Node) error {
 	isCP := map[string]bool{}
 	for _, n := range b.spec.ControlPlanes {
 		isCP[n.ID] = true
 	}
-	servers := map[string]*store.Server{}
-	for _, n := range allNodes(b.spec) {
-		s, err := b.o.Store.GetServer(ctx, n.ID)
-		if err != nil {
-			return err
-		}
-		servers[n.ID] = s
-	}
-	return b.parallel(ctx, allNodes(b.spec), func(ctx context.Context, n bootstrap.Node) error {
-		id := n.ID
-		err := b.jc.Step(ctx, "connect", n.Name+": SSH, Debian 13+ e sudo", &id, func(ctx context.Context, _ *store.JobStep) error {
-			r, err := b.o.open(ctx, servers[n.ID], remote.Hooks{After: func(stage remote.Stage, detail string, err error) {
-				if err == nil && detail != "" {
-					b.jc.Logf(&id, "  %s", detail)
-				}
-			}})
-			if err != nil {
-				return err
-			}
-			r.Redactor().Add(b.sec.Token, b.sec.CertificateKey)
-			b.mu.Lock()
-			b.nodes[n.ID] = r
-			b.mu.Unlock()
-			return nil
-		})
-		if err != nil {
+	return b.parallel(ctx, nodes, func(ctx context.Context, n bootstrap.Node) error {
+		if err := b.connect(ctx, n); err != nil {
 			return err
 		}
 		steps := []struct {
@@ -340,13 +377,18 @@ func (b *bootstrapRun) prepareAll(ctx context.Context) error {
 	})
 }
 
-func (b *bootstrapRun) storeKubeconfig(ctx context.Context, clusterID string, primary bootstrap.Node) (string, error) {
-	r := b.runner(primary.ID)
-	ca, err := r.Run(ctx, bootstrap.ReadCACert, sshx.RunOptions{Sudo: true, Quiet: true}, nil)
+// caHash reads the cluster CA from the node and returns its kubeadm discovery hash.
+func (b *bootstrapRun) caHash(ctx context.Context, n bootstrap.Node) (string, error) {
+	ca, err := b.runner(n.ID).Run(ctx, bootstrap.ReadCACert, sshx.RunOptions{Sudo: true, Quiet: true}, nil)
 	if err != nil {
 		return "", fmt.Errorf("read ca.crt: %w", err)
 	}
-	caHash, err := bootstrap.CACertHash([]byte(ca.Stdout))
+	return bootstrap.CACertHash([]byte(ca.Stdout))
+}
+
+func (b *bootstrapRun) storeKubeconfig(ctx context.Context, clusterID string, primary bootstrap.Node) (string, error) {
+	r := b.runner(primary.ID)
+	caHash, err := b.caHash(ctx, primary)
 	if err != nil {
 		return "", err
 	}

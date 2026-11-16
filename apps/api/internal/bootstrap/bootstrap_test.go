@@ -82,6 +82,16 @@ func TestScriptsAreValidBash(t *testing.T) {
 		"init": s.InitScript(sec), "finalize": KubeVIPFinalizeScript(), "creds": s.JoinCredentialsScript(sec),
 		"join-cp": s.JoinScript(s.ControlPlanes[1], true, sec, "sha256:abc"), "join-w": s.JoinScript(s.Workers[0], false, sec, "sha256:abc"),
 		"cilium": s.CNIScript(), "calico": calico.CNIScript(), "metrics": MetricsServerScript(), "untaint": UntaintScript(), "netcheck": s.NetCheckScript(),
+		"precheck": UpgradePrecheckScript(), "etcd-snapshot": EtcdSnapshotScript("cp1", "v1.38.1"),
+		"upgrade-apply": UpgradeKubeadmScript(s.Version, true), "upgrade-node": UpgradeKubeadmScript(s.Version, false),
+		"upgrade-kubelet": UpgradeKubeletScript(s.Version), "repo-for": RepoScriptFor(s.Version),
+		"drain": DrainScript("w1", true), "cordon": DrainScript("w1", false), "uncordon": UncordonScript("w1"),
+		"wait-node": WaitNodeScript("w1", "v1.37.2"), "wait-kubelet": WaitKubeletScript(), "reboot": RebootScript(),
+		"os-check": OSCheckScript(), "os-upgrade": OSUpgradeScript(), "certs-check": CertsCheckScript(), "certs-renew": CertsRenewScript(),
+		"delete-node": DeleteNodeScript("w1"), "reset-node": ResetNodeScript(),
+		"helm-install":   HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "nginx", Repo: "https://charts.example.com", Version: "1.2.3", Values: "replicaCount: 2\n"}),
+		"helm-oci":       HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "oci://registry.example.com/charts/web"}),
+		"helm-uninstall": HelmScript(HelmRequest{Action: HelmUninstall, Release: "web", Namespace: "apps"}),
 	}
 	for name, body := range scripts {
 		cmd := exec.Command("bash", "-n")

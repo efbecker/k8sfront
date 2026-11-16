@@ -19,8 +19,13 @@ import (
 
 	"github.com/efbecker/k8sfront/apps/api/internal/secrets"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -42,8 +47,13 @@ type Manager struct {
 
 // Cluster is a connected cluster.
 type Cluster struct {
-	ID        string
-	Client    kubernetes.Interface
+	ID     string
+	Client kubernetes.Interface
+	// Dynamic, Mapper and Metadata serve the deploy center (phase 4):
+	// server-side apply of arbitrary manifests and metadata-only listings.
+	Dynamic   dynamic.Interface
+	Mapper    meta.ResettableRESTMapper
+	Metadata  metadata.Interface
 	secretID  string
 	topoOnce  sync.Mutex
 	topo      *Topology
@@ -89,7 +99,18 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	cl := &Cluster{ID: clusterID, Client: cs, secretID: *c.KubeconfigSecretID, log: m.Log.With("cluster", clusterID)}
+	ccfg := clientConfig(cfg)
+	dyn, err := dynamic.NewForConfig(ccfg)
+	if err != nil {
+		return nil, err
+	}
+	md, err := metadata.NewForConfig(ccfg)
+	if err != nil {
+		return nil, err
+	}
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(cs.Discovery()))
+	cl := &Cluster{ID: clusterID, Client: cs, Dynamic: dyn, Mapper: mapper, Metadata: md, secretID: *c.KubeconfigSecretID,
+		log: m.Log.With("cluster", clusterID)}
 	m.clusters[clusterID] = cl
 	return cl, nil
 }
@@ -114,13 +135,17 @@ func (m *Manager) Close() {
 	}
 }
 
-func newClientset(cfg *rest.Config) (*kubernetes.Clientset, error) {
+func clientConfig(cfg *rest.Config) *rest.Config {
 	cfg = rest.CopyConfig(cfg)
 	cfg.UserAgent = "k8sfront"
 	cfg.Timeout = 0 // watches are long-lived; per-request deadlines come from contexts
 	cfg.QPS = 20
 	cfg.Burst = 40
-	return kubernetes.NewForConfig(cfg)
+	return cfg
+}
+
+func newClientset(cfg *rest.Config) (*kubernetes.Clientset, error) {
+	return kubernetes.NewForConfig(clientConfig(cfg))
 }
 
 // Topology returns the live watcher, starting it on first use.
@@ -149,4 +174,13 @@ func (m *Manager) Inject(clusterID, secretID string, cs kubernetes.Interface) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.clusters[clusterID] = &Cluster{ID: clusterID, Client: cs, secretID: secretID, log: m.Log.With("cluster", clusterID)}
+}
+
+// InjectDeploy adds the deploy-center clients to an injected cluster (tests).
+func (m *Manager) InjectDeploy(clusterID string, dyn dynamic.Interface, mapper meta.ResettableRESTMapper, md metadata.Interface) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c, ok := m.clusters[clusterID]; ok {
+		c.Dynamic, c.Mapper, c.Metadata = dyn, mapper, md
+	}
 }
