@@ -49,8 +49,8 @@ const nav: { title: string; items: NavItem[] }[] = [
       { to: "/topology", label: "Topologia ao vivo", icon: Share2, clusterPage: "topology" },
       { to: "/workloads", label: "Workloads", icon: Container, clusterPage: "workloads" },
       { to: "/network", label: "Rede & Storage", icon: Network, clusterPage: "network" },
-      { to: "/apps", label: "Central de Deploy", icon: PackagePlus, phase: 4 },
-      { to: "/updates", label: "Updates & Lifecycle", icon: RefreshCcw, phase: 5 },
+      { to: "/deploy", label: "Central de Deploy", icon: PackagePlus, clusterPage: "deploy" },
+      { to: "/lifecycle", label: "Updates & Lifecycle", icon: RefreshCcw, clusterPage: "lifecycle" },
     ],
   },
 ];

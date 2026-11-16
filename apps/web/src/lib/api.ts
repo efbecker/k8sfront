@@ -301,6 +301,130 @@ export interface NetworkList {
   storageClasses: { name: string; provisioner: string; default: boolean; reclaimPolicy: string; bindingMode: string }[];
 }
 
+// --- Deploy center (phase 4) ----------------------------------------------------
+
+export interface AppSpec {
+  name: string;
+  namespace: string;
+  image: string;
+  replicas: number;
+  containerPort: number;
+  env: { name: string; value: string }[];
+  healthPath: string;
+  resources: { cpuRequest: string; memoryRequest: string; cpuLimit: string; memoryLimit: string };
+  service?: { type: "ClusterIP" | "NodePort" | "LoadBalancer"; port: number; nodePort: number };
+  ingress?: { host: string; path: string; className: string; tlsSecret: string };
+  volume?: { size: string; storageClass: string; mountPath: string; accessMode: string };
+  pullSecret?: { name: string; server: string; username: string; password: string };
+}
+
+export interface ApplyResult {
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+  action: "created" | "configured" | "unchanged" | "error";
+  error?: string;
+}
+
+export interface ApplySummary {
+  dryRun: boolean;
+  results: ApplyResult[];
+  failed: number;
+}
+
+export interface HelmRelease {
+  name: string;
+  namespace: string;
+  revision: number;
+  status: string;
+  updated?: string;
+}
+
+export interface HelmInput {
+  action: "install" | "uninstall";
+  release: string;
+  namespace: string;
+  chart?: string;
+  repo?: string;
+  version?: string;
+  values?: string;
+}
+
+// --- Updates & lifecycle (phase 5) ----------------------------------------------
+
+export interface UpgradeCheck {
+  id: string;
+  name: string;
+  status: CheckStatus;
+  detail: string;
+}
+
+export interface UpgradeTarget {
+  version: string;
+  kind: "patch" | "minor";
+  hops: string[];
+  latest: boolean;
+}
+
+export interface NodeVersion {
+  name: string;
+  controlPlane: boolean;
+  ready: boolean;
+  unschedulable: boolean;
+  kubeletVersion: string;
+  internalIp: string;
+  osImage: string;
+  kernelVersion: string;
+  containerRuntime: string;
+}
+
+export interface UpgradePlan {
+  clusterVersion: string;
+  serverVersion: string;
+  nodes: NodeVersion[];
+  checks: UpgradeCheck[];
+  targets: UpgradeTarget[];
+  blocked: boolean;
+  pausedJob?: Job;
+}
+
+export interface OSPackage {
+  name: string;
+  suite: string;
+  from: string;
+  to: string;
+  security: boolean;
+  held: boolean;
+}
+
+export interface OSNodeReport {
+  serverId: string;
+  name: string;
+  kernel: string;
+  packages: OSPackage[];
+  held: string[];
+  security: number;
+  rebootRequired: boolean;
+  error?: string;
+}
+
+export interface CertInfo {
+  name: string;
+  expires: string;
+  residual: string;
+  authority: boolean;
+  external: boolean;
+}
+
+export interface CertsResult {
+  action: "check" | "renew";
+  nodes: { serverId: string; name: string; certs: CertInfo[] }[];
+  checkedAt: string;
+}
+
+export type RebootPolicy = "never" | "if-required" | "always";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -374,6 +498,40 @@ export const api = {
     request<WorkloadList>("GET", `/clusters/${id}/k8s/workloads${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
   network: (id: string, ns?: string) =>
     request<NetworkList>("GET", `/clusters/${id}/k8s/network${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
+
+  renderApp: (app: AppSpec) => request<{ yaml: string; objects: { kind: string; name: string; namespace?: string }[] }>("POST", "/deploy/render", app),
+  deployApp: (id: string, app: AppSpec, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/deploy/app`, { app, dryRun }),
+  applyManifest: (id: string, manifest: string, namespace: string, dryRun: boolean) =>
+    request<ApplySummary>("POST", `/clusters/${id}/apply`, { manifest, namespace, dryRun }),
+  helmReleases: (id: string) => request<HelmRelease[]>("GET", `/clusters/${id}/helm/releases`),
+  helm: (id: string, input: HelmInput) => request<Job>("POST", `/clusters/${id}/helm`, input),
+
+  upgradePlan: (id: string) => request<UpgradePlan>("GET", `/clusters/${id}/upgrades/plan`),
+  startUpgrade: (id: string, targetVersion: string) => request<Job>("POST", `/clusters/${id}/upgrades`, { targetVersion }),
+  addNode: (id: string, serverId: string) => request<Job>("POST", `/clusters/${id}/nodes`, { serverId }),
+  removeNode: (id: string, serverId: string) => request<Job>("DELETE", `/clusters/${id}/nodes/${serverId}`),
+  cordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/cordon`),
+  uncordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/uncordon`),
+  drain: (id: string, node: string) => request<Job>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/drain`),
+  osCheck: (id: string) => request<Job>("POST", `/clusters/${id}/os-updates/check`),
+  osUpdate: (id: string, serverIds: string[], reboot: RebootPolicy) => request<Job>("POST", `/clusters/${id}/os-updates`, { serverIds, reboot }),
+  rollingReboot: (id: string, serverIds: string[]) => request<Job>("POST", `/clusters/${id}/rolling-reboot`, { serverIds }),
+  certs: (id: string, action: "check" | "renew") => request<Job>("POST", `/clusters/${id}/certs`, { action }),
+};
+
+/** Human labels for job kinds. */
+export const jobKindLabel: Record<string, string> = {
+  "servers.preflight": "Teste de conexão & pré-requisitos",
+  "cluster.bootstrap": "Bootstrap do cluster",
+  "cluster.upgrade": "Upgrade do Kubernetes",
+  "cluster.node-add": "Adicionar worker",
+  "cluster.node-remove": "Remover worker",
+  "cluster.node-drain": "Drenar nó",
+  "cluster.os-check": "Verificar atualizações do SO",
+  "cluster.os-update": "Atualizar SO (rolling)",
+  "cluster.rolling-reboot": "Rolling reboot",
+  "cluster.certs": "Certificados do kubeadm",
+  "cluster.helm": "Helm",
 };
 
 export const isFinal = (s: JobStatus) => s === "succeeded" || s === "failed" || s === "cancelled" || s === "paused";

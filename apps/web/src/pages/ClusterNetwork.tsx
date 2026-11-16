@@ -212,8 +212,8 @@ export function ClusterNetworkPage() {
                     {d.storageClasses.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={4} className="text-muted-foreground py-8 text-center text-sm">
-                          Nenhuma StorageClass. Volumes persistentes precisam de um provisionador (ex.: local-path, NFS, Longhorn), que entra na
-                          Central de Deploy (Fase 4).
+                          Nenhuma StorageClass. Volumes persistentes precisam de um provisionador (ex.: local-path, NFS, Longhorn), que pode ser
+                          instalado pela aba Helm da Central de Deploy.
                         </TableCell>
                       </TableRow>
                     )}

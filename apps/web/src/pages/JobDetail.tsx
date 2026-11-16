@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Ban, Loader2, RotateCw, Wifi, WifiOff } from "lucide-react";
-import { api, isFinal, type JobStep, type LogLine, type PreflightReport } from "@/lib/api";
+import { api, isFinal, jobKindLabel, type JobStep, type LogLine, type PreflightReport } from "@/lib/api";
 import { duration, formatDate } from "@/lib/utils";
 import { useJobStream } from "@/hooks/useJobStream";
 import { PageHeader } from "@/components/layout/AppShell";
@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ReportView } from "./ServerDetail";
 
-const kindLabel: Record<string, string> = { "servers.preflight": "Teste de conexão & pré-requisitos" };
 
 export function JobDetailPage() {
   const { id = "" } = useParams();
@@ -50,7 +49,7 @@ export function JobDetailPage() {
         <ArrowLeft className="size-4" /> Operações
       </Link>
       <PageHeader
-        title={kindLabel[job.kind] ?? job.kind}
+        title={jobKindLabel[job.kind] ?? job.kind}
         description={`Iniciado ${formatDate(job.startedAt ?? job.createdAt)} · duração ${duration(job.startedAt, job.finishedAt)} · tentativa ${job.attempts}`}
         actions={
           <>

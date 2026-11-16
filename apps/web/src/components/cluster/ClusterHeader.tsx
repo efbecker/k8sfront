@@ -1,6 +1,6 @@
 import { NavLink, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowLeft, Container, LayoutDashboard, Network, Share2 } from "lucide-react";
+import { Activity, ArrowLeft, Container, LayoutDashboard, Network, PackagePlus, RefreshCcw, Share2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ClusterStatusBadge } from "@/components/status";
@@ -10,6 +10,8 @@ const tabs = [
   { to: "topology", label: "Topologia ao vivo", icon: Share2 },
   { to: "workloads", label: "Workloads", icon: Container },
   { to: "network", label: "Rede & Storage", icon: Network },
+  { to: "deploy", label: "Central de Deploy", icon: PackagePlus },
+  { to: "lifecycle", label: "Updates & Lifecycle", icon: RefreshCcw },
 ];
 
 /** Title + tabs shared by the cluster management pages. */

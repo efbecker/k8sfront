@@ -19,6 +19,8 @@ import { ClusterOverviewPage } from "@/pages/ClusterOverview";
 import { ClusterTopologyPage } from "@/pages/ClusterTopology";
 import { ClusterWorkloadsPage } from "@/pages/ClusterWorkloads";
 import { ClusterNetworkPage } from "@/pages/ClusterNetwork";
+import { ClusterDeployPage } from "@/pages/ClusterDeploy";
+import { ClusterLifecyclePage } from "@/pages/ClusterLifecycle";
 import { ActiveClusterRedirect } from "@/components/layout/AppShell";
 import "./index.css";
 
@@ -65,7 +67,9 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/clusters/:id/topology" element={<ClusterTopologyPage />} />
                 <Route path="/clusters/:id/workloads" element={<ClusterWorkloadsPage />} />
                 <Route path="/clusters/:id/network" element={<ClusterNetworkPage />} />
-                {["overview", "topology", "workloads", "network"].map((p) => (
+                <Route path="/clusters/:id/deploy" element={<ClusterDeployPage />} />
+                <Route path="/clusters/:id/lifecycle" element={<ClusterLifecyclePage />} />
+                {["overview", "topology", "workloads", "network", "deploy", "lifecycle"].map((p) => (
                   <Route key={p} path={`/${p}`} element={<ActiveClusterRedirect page={p} />} />
                 ))}
                 <Route path="/servers" element={<ServersPage />} />

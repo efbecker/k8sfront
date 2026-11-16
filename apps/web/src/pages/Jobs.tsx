@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, jobKindLabel } from "@/lib/api";
 import { duration, formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
 import { JobStatusBadge } from "@/components/status";
@@ -35,7 +35,7 @@ export function JobsPage() {
                   <TableRow key={j.id}>
                     <TableCell>
                       <Link to={`/jobs/${j.id}`} className="font-medium hover:underline">
-                        {j.kind}
+                        {jobKindLabel[j.kind] ?? j.kind}
                       </Link>
                       <div className="text-muted-foreground font-mono text-xs">{j.id.slice(0, 8)}</div>
                     </TableCell>

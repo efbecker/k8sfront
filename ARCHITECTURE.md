@@ -3,7 +3,7 @@
 Plataforma web para **provisionamento (bootstrap), gestão diária, deploy de aplicações e rolling upgrades**
 de clusters Kubernetes que rodam exclusivamente sobre **Debian 13 (Trixie) ou superior**.
 
-Status: **Fases 1 e 2 entregues** (fundação + bootstrap com Wizard de Deploy); **Fase 3 em andamento** (Visão Geral, Topologia ao vivo, Workloads e Rede & Storage em modo leitura). As seções marcadas com _(Fase N)_ descrevem o desenho alvo das fases seguintes.
+Status: **Fases 1 e 2 entregues** (fundação + bootstrap com Wizard de Deploy); **Fase 3** (Visão Geral, Topologia ao vivo, Workloads e Rede & Storage em modo leitura); **Fase 4** (Central de Deploy: formulário → manifests, editor Monaco com dry-run=server e server-side apply, Helm); **Fase 5** (Updates & Lifecycle: upgrade de versão, nós, patches do SO, rolling reboot, certificados). Itens ainda marcados com _(Fase N)_ são desenho alvo.
 
 ---
 
@@ -78,8 +78,9 @@ Princípios:
 
 Fase 2 adicionou `internal/bootstrap` (spec, configs kubeadm v1beta4, scripts embutidos em `scripts/*.sh`),
 `internal/k8sver` (versões estáveis de `dl.k8s.io`) e `internal/ops/bootstrap.go`.
-Pacotes previstos nas próximas fases: `internal/kube` (client-go, Fase 3), `internal/deploy` + `internal/helm` (Fase 4),
-`internal/upgrade` + `internal/ospatch` (Fase 5).
+Fase 3 adicionou `internal/kube` (client-go). Fase 4 adicionou `internal/deploy` (formulário → manifests, parse de YAML, server-side apply, releases Helm por metadados).
+Fase 5 adicionou `internal/upgrade` (plano de versões e pré-checagens), `internal/ospatch` (parse do estado do APT) e os jobs de lifecycle em `internal/ops`
+(scripts em `internal/bootstrap/scripts/`, renderizados por `internal/bootstrap/lifecycle.go`).
 
 ---
 
@@ -277,11 +278,37 @@ o estado entre `live` e `error`.
 A página tem modo tela cheia para telões de NOC (botão, tecla `F` ou `?kiosk=1` na URL, que abre já em tela cheia
 sem precisar de clique) com relógio, contadores grandes e a tela mantida acesa via Wake Lock quando o navegador permite.
 
+### Endpoints (Fase 4, Central de Deploy)
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| POST | `/deploy/render` | formulário (`AppSpec`) → YAML (Namespace, PVC, Deployment, Service, Ingress); credenciais de registry nunca entram no preview |
+| POST | `/clusters/{id}/deploy/app` | `{app, dryRun}`: renderiza, cria o Secret dockerconfigjson (só aqui) e aplica |
+| POST | `/clusters/{id}/apply` | `{manifest, namespace, dryRun}`: YAML multi-documento (até 200 objetos), Namespaces/CRDs primeiro, server-side apply (`fieldManager=k8sfront`, `force`), `dryRun=All` |
+| GET | `/clusters/{id}/helm/releases` | releases pelos **metadados** dos Secrets `owner=helm` (o payload com values nunca é lido) |
+| POST | `/clusters/{id}/helm` | job `cluster.helm`: `helm upgrade --install --wait` ou `uninstall` no CP primário; values cifrados no cofre (`helm_values`) e apagados no sucesso |
+
+O apply é síncrono (uma chamada por objeto, timeout de 60 s) e continua após erros, como o kubectl. A UI só libera
+“Aplicar” depois de um dry-run sem erros do mesmo conteúdo. Helm roda via CLI no CP primário (binário `v4.x` com
+sha256 verificado), e não via SDK Go, para não trazer a árvore de dependências do Helm para o binário.
+
+### Endpoints (Fase 5, Updates & Lifecycle)
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/clusters/{id}/upgrades/plan` | versão da API, nós, pré-checagens (Ready, skew, PDBs, upgrade pendente) e destinos com a cadeia de minors |
+| POST | `/clusters/{id}/upgrades` | `{targetVersion}` (precisa estar no plano) → job `cluster.upgrade` |
+| POST · DELETE | `/clusters/{id}/nodes` · `/clusters/{id}/nodes/{serverId}` | adicionar / remover **worker** (`cluster.node-add` / `cluster.node-remove`) |
+| POST | `/clusters/{id}/k8s/nodes/{name}/cordon` · `uncordon` · `drain` | cordon/uncordon imediatos (client-go); drain é job (`cluster.node-drain`) |
+| POST | `/clusters/{id}/os-updates/check` · `/clusters/{id}/os-updates` | `cluster.os-check` (paralelo) · `cluster.os-update` `{serverIds, reboot: never\|if-required\|always}` |
+| POST | `/clusters/{id}/rolling-reboot` | `cluster.rolling-reboot` `{serverIds}` |
+| POST | `/clusters/{id}/certs` | `{action: check\|renew}` → `cluster.certs` |
+
+Jobs de manutenção que alteram o cluster (upgrade, nós, SO, reboot, renovação) são exclusivos: 409 se outro estiver pendente/rodando.
+
 ### Endpoints previstos
-- _(Fase 3)_ `POST /clusters/{id}/nodes` (scale-up), `DELETE /clusters/{id}/nodes/{name}`.
-- _(Fase 3)_ cordon/uncordon/drain, configmaps, secrets mascarados, WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
-- _(Fase 4)_ `POST /clusters/{id}/apply` (`dryRun=server`), `/clusters/{id}/helm/releases|repos|charts`.
-- _(Fase 5)_ `/clusters/{id}/upgrades/plan|start`, `/servers/{id}/os-updates`, `/clusters/{id}/rolling-reboot`.
+- _(Fase 3)_ configmaps, secrets mascarados, WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
+- _(Fase 5)_ adicionar/remover control planes (hoje só workers).
 
 ---
 
@@ -317,11 +344,16 @@ em `go test ./internal/bootstrap/`.
 Kubeconfig decifrado em memória por cluster; informers para nós/eventos; drain com Eviction API (respeita PDB,
 ignora DaemonSets, trata `emptyDir`). Logs e exec via WebSocket (Xterm.js interativo).
 
-### Fase 4 · Central de deploy
+### Fase 4 · Central de deploy (entregue)
 Formulário visual → manifests gerados no backend (Deployment/Service/Ingress/PVC/imagePullSecret) com preview YAML;
-editor Monaco com `dry-run=server` antes do apply (server-side apply); Helm via SDK Go.
+editor Monaco (empacotado localmente, sem CDN) com `dry-run=server` antes do apply (server-side apply); Helm via CLI no CP primário.
 
-### Fase 5 · Updates & Lifecycle
+### Fase 5 · Updates & Lifecycle (entregue)
+Implementado como desenhado abaixo. Detalhes de execução: o nome do nó no Kubernetes é resolvido pelo InternalIP (ou
+hostname); o drain roda `kubectl drain` no CP primário (Eviction API) com timeout de 10 min; em cluster de nó único só
+há cordon. O reboot é agendado com `systemd-run` e o job espera o SSH voltar com **novo boot id** (refazendo a
+validação Debian 13+) e o kubelet ativo. A renovação de certificados recoloca os static pods um a um e regrava o
+`admin.conf` no cofre. Snapshots do etcd ficam em `/var/backups/k8sfront` (últimos 5) no CP primário.
 - **Upgrade Kubernetes (`cluster.upgrade`)**: plano calcula a cadeia de minors (`1.31 → 1.32 → 1.33`, nunca pula).
   Pré-checks: `kubeadm upgrade plan`, todos os nós `Ready`, saúde do etcd, APIs depreciadas, PDBs bloqueantes,
   **snapshot do etcd**. Ordem: CP primário (`kubeadm upgrade apply`) → CPs adicionais (`kubeadm upgrade node`) →

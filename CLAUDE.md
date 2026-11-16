@@ -45,7 +45,7 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 
 - Componentes UI em `src/components/ui` seguem a API do shadcn/ui (cva + `cn`). Ícones só de `lucide-react`.
 - Dados do servidor via TanStack Query (`src/lib/api.ts` é o único lugar que chama `fetch`). Streams via `JobStream` (`src/lib/jobStream.ts`), que retoma pelo último `seq`.
-- Logs de execução sempre em Xterm.js (`LogConsole`). Edição de YAML (Fase 4) será Monaco.
+- Logs de execução sempre em Xterm.js (`LogConsole`). Edição de YAML em Monaco (`components/deploy/YamlEditor`, carregado sob demanda e sem CDN).
 - Textos de interface em português; identificadores e código em inglês. Suporte obrigatório a tema claro e escuro.
 
 ## Regras de segurança (não negociáveis)
