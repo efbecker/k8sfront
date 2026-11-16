@@ -96,6 +96,9 @@ func TestScriptsAreValidBash(t *testing.T) {
 			t.Errorf("%s runs apt-get without the non-interactive dpkg options", name)
 		}
 	}
+	if !strings.Contains(scripts["containerd"], "/opt/cni/bin") || !strings.Contains(scripts["containerd"], "containernetworking-plugins") {
+		t.Error("containerd must look for CNI plugins in /opt/cni/bin (where Cilium/Calico install them), not Debian's /usr/lib/cni")
+	}
 	if !strings.Contains(scripts["repo"], "/etc/apt/keyrings/kubernetes-apt-keyring.gpg") || !strings.Contains(scripts["repo"], "v1.37") {
 		t.Error("repo script must use the keyrings directory and the minor channel")
 	}
