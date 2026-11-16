@@ -89,4 +89,15 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv11", "ss01";
   }
+  /* Native controls (select popups, scrollbars) follow the theme. */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  option,
+  optgroup {
+    @apply bg-popover text-popover-foreground;
+  }
 }

@@ -325,6 +325,7 @@ export interface ApplyResult {
   name: string;
   action: "created" | "configured" | "unchanged" | "error";
   error?: string;
+  note?: string;
 }
 
 export interface ApplySummary {

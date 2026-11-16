@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -180,3 +181,72 @@ metadata: {name: shop}
 type resettable struct{ meta.RESTMapper }
 
 func (resettable) Reset() {}
+
+// A dry-run cannot see a Namespace created by the same manifest: objects in
+// it must not fail with "namespace not found", but real errors still count.
+func TestDryRunNamespaceInSameBatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvrs := map[schema.GroupVersionResource]string{
+		{Version: "v1", Resource: "namespaces"}: "NamespaceList",
+		{Version: "v1", Resource: "configmaps"}: "ConfigMapList",
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrs)
+	dyn.PrependReactor("patch", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pa := action.(k8stesting.PatchAction)
+		u := &unstructured.Unstructured{}
+		if err := json.Unmarshal(pa.GetPatch(), &u.Object); err != nil {
+			return true, nil, err
+		}
+		if pa.GetNamespace() == "teste" {
+			if u.GetName() == "bad" {
+				return true, nil, apierrors.NewInvalid(schema.GroupKind{Kind: "ConfigMap"}, "bad", nil)
+			}
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "teste")
+		}
+		if pa.GetNamespace() == "ghost" {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "ghost")
+		}
+		u.SetResourceVersion("1")
+		return true, u, nil
+	})
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, meta.RESTScopeRoot)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, meta.RESTScopeNamespace)
+	objs, err := Parse(`apiVersion: v1
+kind: ConfigMap
+metadata: {name: cfg, namespace: teste}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: bad, namespace: teste}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: lost, namespace: ghost}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: teste}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Applier{Dynamic: dyn, Mapper: resettable{mapper}}
+	sum := a.Apply(context.Background(), objs, "default", true)
+	got := map[string]Result{}
+	for _, r := range sum.Results {
+		got[r.Name] = r
+	}
+	if got["cfg"].Action != "created" || got["cfg"].Note == "" {
+		t.Fatalf("object in batch namespace: %+v", got["cfg"])
+	}
+	if got["bad"].Action != "error" {
+		t.Fatalf("real validation error hidden: %+v", got["bad"])
+	}
+	if got["lost"].Action != "error" {
+		t.Fatalf("namespace outside the batch must still fail: %+v", got["lost"])
+	}
+	if sum.Failed != 2 {
+		t.Fatalf("failed = %d (%+v)", sum.Failed, sum.Results)
+	}
+}

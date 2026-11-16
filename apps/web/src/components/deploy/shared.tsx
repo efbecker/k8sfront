@@ -82,6 +82,7 @@ export function ApplyResults({ summary }: { summary: ApplySummary }) {
                     {summary.dryRun ? a.dry : a.label}
                   </Badge>
                   {r.error && <div className="text-destructive mt-1 max-w-xl text-xs break-words">{r.error}</div>}
+                  {r.note && <div className="text-muted-foreground mt-1 max-w-xl text-xs break-words">{r.note}</div>}
                 </TableCell>
               </TableRow>
             );

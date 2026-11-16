@@ -77,6 +77,9 @@ type Result struct {
 	// Action: created | configured | unchanged | error.
 	Action string `json:"action"`
 	Error  string `json:"error,omitempty"`
+	// Note explains a partial validation (e.g. dry-run inside a namespace
+	// that only this same batch creates).
+	Note string `json:"note,omitempty"`
 }
 
 // Summary is the response of an apply.
@@ -121,6 +124,9 @@ func (a *Applier) Apply(ctx context.Context, objs []*unstructured.Unstructured, 
 	}
 	sum := &Summary{DryRun: dryRun, Results: []Result{}}
 	reset := false
+	// Namespaces this batch creates: a dry-run persists nothing, so the API
+	// answers "namespace not found" for objects inside them.
+	pendingNS := map[string]bool{}
 	for _, u := range order(objs) {
 		res := Result{APIVersion: u.GetAPIVersion(), Kind: u.GetKind(), Name: u.GetName(), Namespace: u.GetNamespace()}
 		err := func() error {
@@ -152,6 +158,9 @@ func (a *Applier) Apply(ctx context.Context, objs []*unstructured.Unstructured, 
 			}
 			u.SetManagedFields(nil)
 			u.SetResourceVersion("")
+			if dryRun && res.Namespace != "" && pendingNS[res.Namespace] {
+				return a.dryRunInPendingNS(ctx, ri, u, &res)
+			}
 			prev, err := ri.Get(ctx, u.GetName(), metav1.GetOptions{})
 			exists := err == nil
 			if err != nil && !apierrors.IsNotFound(err) {
@@ -173,6 +182,9 @@ func (a *Applier) Apply(ctx context.Context, objs []*unstructured.Unstructured, 
 			switch {
 			case !exists:
 				res.Action = "created"
+				if dryRun && u.GetKind() == "Namespace" && mapping.Resource.Group == "" {
+					pendingNS[u.GetName()] = true
+				}
 			case out.GetResourceVersion() == prev.GetResourceVersion():
 				res.Action = "unchanged"
 			default:
@@ -187,6 +199,43 @@ func (a *Applier) Apply(ctx context.Context, objs []*unstructured.Unstructured, 
 		sum.Results = append(sum.Results, res)
 	}
 	return sum
+}
+
+// dryRunInPendingNS dry-runs an object whose namespace does not exist yet
+// because it is created by the same batch. The object cannot already exist,
+// so it will be created; if the API rejects it only because the namespace is
+// missing, that is expected and reported as a note instead of an error.
+func (a *Applier) dryRunInPendingNS(ctx context.Context, ri dynamic.ResourceInterface, u *unstructured.Unstructured, res *Result) error {
+	body, err := json.Marshal(u.Object)
+	if err != nil {
+		return err
+	}
+	force := true
+	opts := metav1.PatchOptions{FieldManager: FieldManager, Force: &force, DryRun: []string{metav1.DryRunAll}}
+	_, err = ri.Patch(ctx, u.GetName(), types.ApplyPatchType, body, opts)
+	if err != nil && !namespaceNotFound(err, u.GetNamespace()) {
+		return err
+	}
+	res.Action = "created"
+	if err != nil {
+		res.Note = fmt.Sprintf("o namespace %s é criado neste mesmo manifesto; a validação completa deste objeto acontece no apply", u.GetNamespace())
+	}
+	return nil
+}
+
+// namespaceNotFound reports whether err is the API's "namespaces <ns> not found".
+func namespaceNotFound(err error, ns string) bool {
+	if !apierrors.IsNotFound(err) {
+		return false
+	}
+	var se apierrors.APIStatus
+	if errors.As(err, &se) {
+		if d := se.Status().Details; d != nil && d.Kind == "namespaces" {
+			return d.Name == ns
+		}
+		return strings.Contains(se.Status().Message, fmt.Sprintf("namespaces %q not found", ns))
+	}
+	return false
 }
 
 func cleanError(err error) string {
