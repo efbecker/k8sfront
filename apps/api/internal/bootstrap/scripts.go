@@ -101,6 +101,12 @@ func MetricsServerScript() string {
 	return render("metrics-server", map[string]string{"Version": DefaultMetricsServer})
 }
 
+// NetCheckScript waits for every node to be Ready and proves that pods get a
+// network sandbox on each of them (DaemonSet of pause) and that CoreDNS runs.
+func (s *Spec) NetCheckScript() string {
+	return render("netcheck", map[string]string{"Version": s.Version.String()})
+}
+
 func UntaintScript() string { return render("untaint", nil) }
 
 // Read-only commands whose output the orchestrator parses (run with Quiet).

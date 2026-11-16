@@ -54,7 +54,7 @@ func classify(script string) string {
 		{"apt-mark hold kubelet", "packages"}, {"Desativando swap", "swap"}, {"modules-load.d/k8s.conf", "kernel"}, {"SystemdCgroup", "containerd-or-packages"},
 		{"pkgs.k8s.io/core:/stable", "repo"}, {"config images pull", "images"}, {"kubeadm init --config", "init"},
 		{"super-admin.conf#", "kube-vip-finalize"}, {"kubeadm token create", "join-credentials"}, {"kubeadm join --config", "join"},
-		{"tigera-operator", "cni"}, {"cilium install", "cni"}, {"metrics-server", "metrics-server"}, {"node-role.kubernetes.io/control-plane:NoSchedule-", "untaint"},
+		{"tigera-operator", "cni"}, {"cilium install", "cni"}, {"k8sfront-netcheck", "netcheck"}, {"metrics-server", "metrics-server"}, {"node-role.kubernetes.io/control-plane:NoSchedule-", "untaint"},
 		{bootstrap.ReadCACert, "read-ca"}, {bootstrap.ReadAdminConf, "read-admin"}, {"get nodes -o json", "get-nodes"},
 	}
 	for _, m := range markers {
@@ -235,7 +235,7 @@ func TestBootstrapHAOrderingAndResume(t *testing.T) {
 
 	// Resume: finished steps are skipped, failed and always-run steps rerun.
 	for entry, want := range map[string]int{"cp1:swap": 1, "w2:packages": 1, "cp1:init": 1, "cp1:cni": 1, "cp2:join": 1, "w1:join": 1,
-		"w2:join": 2, "cp1:join-credentials": 2, "cp1:metrics-server": 1} {
+		"w2:join": 2, "cp1:join-credentials": 2, "cp1:metrics-server": 1, "cp1:netcheck": 1} {
 		if got := fc.count(entry); got != want {
 			t.Errorf("%s ran %d times, want %d (log %v)", entry, got, want, fc.log)
 		}

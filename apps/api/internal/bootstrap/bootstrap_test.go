@@ -81,7 +81,7 @@ func TestScriptsAreValidBash(t *testing.T) {
 		"repo": s.RepoScript(), "packages": s.PackagesScript(), "images": s.ImagesScript(),
 		"init": s.InitScript(sec), "finalize": KubeVIPFinalizeScript(), "creds": s.JoinCredentialsScript(sec),
 		"join-cp": s.JoinScript(s.ControlPlanes[1], true, sec, "sha256:abc"), "join-w": s.JoinScript(s.Workers[0], false, sec, "sha256:abc"),
-		"cilium": s.CNIScript(), "calico": calico.CNIScript(), "metrics": MetricsServerScript(), "untaint": UntaintScript(),
+		"cilium": s.CNIScript(), "calico": calico.CNIScript(), "metrics": MetricsServerScript(), "untaint": UntaintScript(), "netcheck": s.NetCheckScript(),
 	}
 	for name, body := range scripts {
 		cmd := exec.Command("bash", "-n")

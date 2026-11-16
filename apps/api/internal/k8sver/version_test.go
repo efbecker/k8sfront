@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -23,9 +24,9 @@ func TestParseAndCompare(t *testing.T) {
 
 func TestStableFetch(t *testing.T) {
 	markers := map[string]string{"/stable.txt": "v1.37.2\n", "/stable-1.36.txt": "v1.36.6", "/stable-1.35.txt": "v1.35.9", "/stable-1.34.txt": "v1.34.13"}
-	hits := 0
+	var hits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits++
+		hits.Add(1)
 		if m, ok := markers[r.URL.Path]; ok {
 			w.Write([]byte(m))
 			return
@@ -42,8 +43,8 @@ func TestStableFetch(t *testing.T) {
 	if len(rel) != 4 || rel[0].Version != "v1.37.2" || !rel[0].Latest || rel[3].Version != "v1.34.13" {
 		t.Fatalf("unexpected: %+v", rel)
 	}
-	before := hits
-	if _, err := f.Stable(context.Background()); err != nil || hits != before {
+	before := hits.Load()
+	if _, err := f.Stable(context.Background()); err != nil || hits.Load() != before {
 		t.Fatal("second call must be served from cache")
 	}
 }

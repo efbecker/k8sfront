@@ -203,6 +203,13 @@ func (o *Ops) bootstrap(ctx context.Context, jc *jobs.Context) (err error) {
 			return err
 		}
 	}
+	// Always runs (also on retry): every node must run networked pods before
+	// add-ons are installed, otherwise they would hang in ContainerCreating.
+	if err := jc.Step(ctx, "netcheck", fmt.Sprintf("rede de pods em %d nó(s) e CoreDNS", len(spec.ControlPlanes)+len(spec.Workers)), &pid, func(ctx context.Context, st *store.JobStep) error {
+		return b.exec(ctx, st, primary, spec.NetCheckScript())
+	}); err != nil {
+		return err
+	}
 	if spec.Options.MetricsServer {
 		// The script bounds its own waits (nodes Ready 10m + rollout 5m); this
 		// is the backstop so a stuck SSH session can never hold the job forever.
