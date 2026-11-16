@@ -1,37 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Box,
-  Diamond,
-  Expand,
-  Maximize2,
-  Shrink,
-  Minus,
-  Plus,
-  Search,
-  Server,
-  X,
-} from "lucide-react";
+import { Box, Diamond, Expand, Maximize2, Shrink, Minus, Plus, Search, Server, X } from "lucide-react";
 import { api, type K8sPod } from "@/lib/api";
 import { cn, formatBytes } from "@/lib/utils";
-import {
-  nodeStatus,
-  podHealth,
-  podStatus,
-  selects,
-  TopologyModel,
-  TopologyStream,
-  type TopoChange,
-  type TopoConnState,
-} from "@/lib/topologyStream";
-import {
-  SYSTEM_NAMESPACES,
-  TopologyScene,
-  type ColorMode,
-  type Hit,
-  type SceneOptions,
-} from "@/components/topology/scene";
+import { nodeStatus, podHealth, podStatus, selects, TopologyModel, TopologyStream, type TopoChange, type TopoConnState } from "@/lib/topologyStream";
+import { SYSTEM_NAMESPACES, TopologyScene, type ColorMode, type Hit, type SceneOptions } from "@/components/topology/scene";
 import { ClusterHeader } from "@/components/cluster/ClusterHeader";
 import { age, NodeBadge, PodBadge } from "@/components/cluster/k8s";
 import { Badge } from "@/components/ui/badge";
@@ -46,23 +20,10 @@ const connLabel: Record<TopoConnState, { label: string; cls: string }> = {
   closed: { label: "Desconectado", cls: "bg-muted-foreground" },
 };
 
-function Toggle({
-  checked,
-  onChange,
-  children,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  children: React.ReactNode;
-}) {
+function Toggle({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
   return (
     <label className="flex cursor-pointer items-center gap-1.5 text-sm select-none">
-      <input
-        type="checkbox"
-        className="accent-primary size-3.5"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
+      <input type="checkbox" className="accent-primary size-3.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {children}
     </label>
   );
@@ -79,9 +40,7 @@ export function ClusterTopologyPage() {
   });
   const [feed, setFeed] = useState<TopoChange[]>([]);
   const [selected, setSelected] = useState<Hit | null>(null);
-  const [hover, setHover] = useState<{ hit: Hit; x: number; y: number } | null>(
-    null,
-  );
+  const [hover, setHover] = useState<{ hit: Hit; x: number; y: number } | null>(null);
   const [opts, setOpts] = useState<SceneOptions>({
     hideSystem: false,
     showServices: true,
@@ -107,16 +66,8 @@ export function ClusterTopologyPage() {
         const changes = model.apply(msg);
         if (msg.type === "status") return;
         scene.sync(changes);
-        const notable = changes.filter(
-          (c) =>
-            !(
-              msg.type === "snapshot" &&
-              c.action === "added" &&
-              changes.length > 30
-            ),
-        );
-        if (notable.length)
-          setFeed((f) => [...notable.reverse(), ...f].slice(0, 40));
+        const notable = changes.filter((c) => !(msg.type === "snapshot" && c.action === "added" && changes.length > 30));
+        if (notable.length) setFeed((f) => [...notable.reverse(), ...f].slice(0, 40));
         // Throttle React updates (side panel, counters) to animation frames.
         if (!pending) {
           pending = true;
@@ -170,14 +121,11 @@ export function ClusterTopologyPage() {
   });
   const toggleFull = useCallback(() => {
     if (full) {
-      if (document.fullscreenElement)
-        void document.exitFullscreen().catch(() => {});
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
       setFull(false);
     } else {
       setFull(true);
-      void stageRef.current
-        ?.requestFullscreen?.({ navigationUI: "hide" })
-        .catch(() => {});
+      void stageRef.current?.requestFullscreen?.({ navigationUI: "hide" }).catch(() => {});
     }
   }, [full]);
   useEffect(() => {
@@ -192,8 +140,7 @@ export function ClusterTopologyPage() {
       const t = e.target as HTMLElement;
       if (t.closest("input, select, textarea")) return;
       if (e.key === "f" || e.key === "F") toggleFull();
-      else if (e.key === "Escape" && full && !document.fullscreenElement)
-        setFull(false);
+      else if (e.key === "Escape" && full) toggleFull();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -224,26 +171,15 @@ export function ClusterTopologyPage() {
     return () => clearInterval(t);
   }, [full]);
 
-  const set = (patch: Partial<SceneOptions>) =>
-    setOpts((o) => ({ ...o, ...patch }));
+  const set = (patch: Partial<SceneOptions>) => setOpts((o) => ({ ...o, ...patch }));
   const select = (hit: Hit | null) => setSelected(hit);
   const live = conn.state === "live" && model.hasSnapshot;
 
   const liveChip = (
-    <span
-      className="flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
-      title={conn.message}
-    >
+    <span className="flex items-center gap-2 rounded-full border px-3 py-1 text-xs" title={conn.message}>
       <span className={cn("relative flex size-2")}>
-        {live && (
-          <span className="bg-success absolute inline-flex size-full animate-ping rounded-full opacity-60" />
-        )}
-        <span
-          className={cn(
-            "relative inline-flex size-2 rounded-full",
-            connLabel[conn.state].cls,
-          )}
-        />
+        {live && <span className="bg-success absolute inline-flex size-full animate-ping rounded-full opacity-60" />}
+        <span className={cn("relative inline-flex size-2 rounded-full", connLabel[conn.state].cls)} />
       </span>
       {connLabel[conn.state].label}
     </span>
@@ -256,111 +192,57 @@ export function ClusterTopologyPage() {
         right={
           <>
             {liveChip}
-            <Button
-              variant="outline"
-              onClick={toggleFull}
-              title="Tela cheia (F)"
-            >
+            <Button variant="outline" onClick={toggleFull} title="Tela cheia (F)">
               <Expand /> Tela cheia
             </Button>
           </>
         }
       />
 
-      <div
-        ref={stageRef}
-        className={cn(
-          full && "bg-background fixed inset-0 z-50 flex flex-col gap-3 p-4",
-        )}
-      >
+      <div ref={stageRef} className={cn(full && "bg-background fixed inset-0 z-50 flex flex-col gap-3 p-4")}>
         {full && (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <div className="flex items-center gap-3">
               <img src="/favicon.svg" alt="" className="size-8" />
               <div className="leading-tight">
-                <div className="text-xl font-semibold">
-                  {cluster.data?.name ?? "Cluster"}
-                </div>
-                <div className="text-muted-foreground text-xs">
-                  Kubernetes {cluster.data?.kubernetesVersion} · topologia ao
-                  vivo
-                </div>
+                <div className="text-xl font-semibold">{cluster.data?.name ?? "Cluster"}</div>
+                <div className="text-muted-foreground text-xs">Kubernetes {cluster.data?.kubernetesVersion} · topologia ao vivo</div>
               </div>
             </div>
             {liveChip}
             <div className="flex flex-wrap items-center gap-5 text-sm">
-              <NocStat
-                label="Nós prontos"
-                value={`${stats.nodesReady}/${stats.nodes}`}
-                bad={stats.nodesReady < stats.nodes}
-              />
+              <NocStat label="Nós prontos" value={`${stats.nodesReady}/${stats.nodes}`} bad={stats.nodesReady < stats.nodes} />
               <NocStat label="Pods" value={stats.pods} />
               <NocStat label="Rodando" value={stats.running} dot="bg-success" />
-              <NocStat
-                label="Pendentes"
-                value={stats.pending}
-                dot="bg-warning"
-              />
-              <NocStat
-                label="Com problema"
-                value={stats.problem}
-                dot="bg-destructive"
-                bad={stats.problem > 0}
-              />
+              <NocStat label="Pendentes" value={stats.pending} dot="bg-warning" />
+              <NocStat label="Com problema" value={stats.problem} dot="bg-destructive" bad={stats.problem > 0} />
               <NocStat label="Services" value={stats.services} />
             </div>
             <div className="ml-auto flex items-center gap-3">
-              <span className="text-2xl font-semibold tabular-nums">
-                {clock.toLocaleTimeString("pt-BR")}
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={toggleFull}
-                title="Sair da tela cheia (Esc)"
-                aria-label="Sair da tela cheia"
-              >
+              <span className="text-2xl font-semibold tabular-nums">{clock.toLocaleTimeString("pt-BR")}</span>
+              <Button variant="outline" size="icon" onClick={toggleFull} title="Sair da tela cheia (Esc)" aria-label="Sair da tela cheia">
                 <Shrink />
               </Button>
             </div>
           </div>
         )}
         {conn.state === "error" && conn.message && (
-          <div className="border-destructive/40 bg-destructive/10 text-destructive mb-3 rounded-lg border px-3 py-2 text-sm">
-            {conn.message}
-          </div>
+          <div className="border-destructive/40 bg-destructive/10 text-destructive mb-3 rounded-lg border px-3 py-2 text-sm">{conn.message}</div>
         )}
 
         {!full && (
           <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <Stat
-              label="Nós prontos"
-              value={`${stats.nodesReady}/${stats.nodes}`}
-            />
+            <Stat label="Nós prontos" value={`${stats.nodesReady}/${stats.nodes}`} />
             <Stat label="Pods" value={stats.pods} />
             <Stat label="Rodando" value={stats.running} dot="bg-success" />
             <Stat label="Pendentes" value={stats.pending} dot="bg-warning" />
-            <Stat
-              label="Com problema"
-              value={stats.problem}
-              dot="bg-destructive"
-            />
+            <Stat label="Com problema" value={stats.problem} dot="bg-destructive" />
             <Stat label="Services" value={stats.services} />
           </div>
         )}
 
-        <div
-          className={cn(
-            "bg-card flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border px-3 py-2",
-            !full && "mb-3",
-          )}
-        >
-          <NativeSelect
-            className="h-8 w-56"
-            value={opts.namespace}
-            onChange={(e) => set({ namespace: e.target.value })}
-            aria-label="Namespace"
-          >
+        <div className={cn("bg-card flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border px-3 py-2", !full && "mb-3")}>
+          <NativeSelect className="h-8 w-56" value={opts.namespace} onChange={(e) => set({ namespace: e.target.value })} aria-label="Namespace">
             <option value="">Todos os namespaces</option>
             {stats.namespaces.map((ns) => (
               <option key={ns} value={ns}>
@@ -377,16 +259,10 @@ export function ClusterTopologyPage() {
               onChange={(e) => set({ search: e.target.value })}
             />
           </div>
-          <Toggle
-            checked={opts.hideSystem}
-            onChange={(v) => set({ hideSystem: v })}
-          >
+          <Toggle checked={opts.hideSystem} onChange={(v) => set({ hideSystem: v })}>
             Ocultar namespaces do sistema
           </Toggle>
-          <Toggle
-            checked={opts.showServices}
-            onChange={(v) => set({ showServices: v })}
-          >
+          <Toggle checked={opts.showServices} onChange={(v) => set({ showServices: v })}>
             Services
           </Toggle>
           <Toggle checked={opts.traffic} onChange={(v) => set({ traffic: v })}>
@@ -398,12 +274,7 @@ export function ClusterTopologyPage() {
               <button
                 key={m}
                 onClick={() => set({ colorBy: m })}
-                className={cn(
-                  "rounded-md px-2 py-0.5",
-                  opts.colorBy === m
-                    ? "bg-primary/15 text-primary font-medium"
-                    : "hover:bg-accent",
-                )}
+                className={cn("rounded-md px-2 py-0.5", opts.colorBy === m ? "bg-primary/15 text-primary font-medium" : "hover:bg-accent")}
               >
                 {m === "status" ? "Status" : "Namespace"}
               </button>
@@ -411,56 +282,22 @@ export function ClusterTopologyPage() {
           </div>
         </div>
 
-        <div
-          className={cn(
-            "flex flex-col gap-3 lg:flex-row",
-            full && "min-h-0 flex-1",
-          )}
-        >
-          <div
-            className={cn(
-              "bg-background relative flex-1 overflow-hidden rounded-xl border",
-              full ? "min-h-0" : "h-[62vh] min-h-[420px]",
-            )}
-          >
-            <canvas
-              ref={canvasRef}
-              className="block cursor-grab touch-none"
-              aria-label="Topologia do cluster"
-            />
+        <div className={cn("flex flex-col gap-3 lg:flex-row", full && "min-h-0 flex-1")}>
+          <div className={cn("bg-background relative flex-1 overflow-hidden rounded-xl border", full ? "min-h-0" : "h-[62vh] min-h-[420px]")}>
+            <canvas ref={canvasRef} className="block cursor-grab touch-none" aria-label="Topologia do cluster" />
             {!model.hasSnapshot && (
               <div className="text-muted-foreground absolute inset-0 flex items-center justify-center text-sm">
-                {conn.state === "error"
-                  ? "Sem conexão com a API do Kubernetes."
-                  : "Carregando a topologia do cluster…"}
+                {conn.state === "error" ? "Sem conexão com a API do Kubernetes." : "Carregando a topologia do cluster…"}
               </div>
             )}
             <div className="absolute top-3 right-3 flex flex-col gap-1">
-              <Button
-                size="icon"
-                variant="outline"
-                className="size-8"
-                title="Aproximar"
-                onClick={() => sceneRef.current?.zoom(1.25)}
-              >
+              <Button size="icon" variant="outline" className="size-8" title="Aproximar" onClick={() => sceneRef.current?.zoom(1.25)}>
                 <Plus />
               </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                className="size-8"
-                title="Afastar"
-                onClick={() => sceneRef.current?.zoom(0.8)}
-              >
+              <Button size="icon" variant="outline" className="size-8" title="Afastar" onClick={() => sceneRef.current?.zoom(0.8)}>
                 <Minus />
               </Button>
-              <Button
-                size="icon"
-                variant="outline"
-                className="size-8"
-                title="Enquadrar tudo"
-                onClick={() => sceneRef.current?.fit()}
-              >
+              <Button size="icon" variant="outline" className="size-8" title="Enquadrar tudo" onClick={() => sceneRef.current?.fit()}>
                 <Maximize2 />
               </Button>
               <Button
@@ -476,21 +313,12 @@ export function ClusterTopologyPage() {
             <ActivityFeed
               feed={feed}
               onPick={(c) =>
-                model[
-                  c.kind === "pod"
-                    ? "pods"
-                    : c.kind === "node"
-                      ? "nodes"
-                      : "services"
-                ].has(c.uid) && select({ kind: c.kind, uid: c.uid })
+                model[c.kind === "pod" ? "pods" : c.kind === "node" ? "nodes" : "services"].has(c.uid) && select({ kind: c.kind, uid: c.uid })
               }
             />
-            {hover && (
-              <Tooltip model={model} hit={hover.hit} x={hover.x} y={hover.y} />
-            )}
+            {hover && <Tooltip model={model} hit={hover.hit} x={hover.x} y={hover.y} />}
             <div className="text-muted-foreground pointer-events-none absolute right-3 bottom-2 text-[11px]">
-              Arraste para mover · role para zoom · arraste um nó para
-              reposicionar
+              Arraste para mover · role para zoom · arraste um nó para reposicionar
             </div>
           </div>
           {/* In NOC mode the side panel only shows up for a selection. */}
@@ -502,18 +330,9 @@ export function ClusterTopologyPage() {
               )}
             >
               {selected ? (
-                <Details
-                  model={model}
-                  hit={selected}
-                  onSelect={select}
-                  version={version}
-                />
+                <Details model={model} hit={selected} onSelect={select} version={version} />
               ) : (
-                <Legend
-                  colorBy={opts.colorBy}
-                  namespaces={stats.namespaces}
-                  scene={sceneRef.current}
-                />
+                <Legend colorBy={opts.colorBy} namespaces={stats.namespaces} scene={sceneRef.current} />
               )}
             </aside>
           )}
@@ -523,44 +342,19 @@ export function ClusterTopologyPage() {
   );
 }
 
-function NocStat({
-  label,
-  value,
-  dot,
-  bad,
-}: {
-  label: string;
-  value: React.ReactNode;
-  dot?: string;
-  bad?: boolean;
-}) {
+function NocStat({ label, value, dot, bad }: { label: string; value: React.ReactNode; dot?: string; bad?: boolean }) {
   return (
     <div className="leading-tight">
       <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
         {dot && <span className={cn("size-2 rounded-full", dot)} />}
         {label}
       </div>
-      <div
-        className={cn(
-          "text-2xl font-semibold tabular-nums",
-          bad && "text-destructive",
-        )}
-      >
-        {value}
-      </div>
+      <div className={cn("text-2xl font-semibold tabular-nums", bad && "text-destructive")}>{value}</div>
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  dot,
-}: {
-  label: string;
-  value: React.ReactNode;
-  dot?: string;
-}) {
+function Stat({ label, value, dot }: { label: string; value: React.ReactNode; dot?: string }) {
   return (
     <div className="bg-card rounded-lg border px-3 py-2">
       <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
@@ -579,26 +373,15 @@ const actionText: Record<TopoChange["action"], string> = {
   restarted: "reiniciou",
 };
 
-function ActivityFeed({
-  feed,
-  onPick,
-}: {
-  feed: TopoChange[];
-  onPick: (c: TopoChange) => void;
-}) {
+function ActivityFeed({ feed, onPick }: { feed: TopoChange[]; onPick: (c: TopoChange) => void }) {
   if (!feed.length) return null;
   return (
     <div className="bg-card/85 absolute bottom-7 left-3 max-h-40 w-80 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-lg border text-xs shadow-sm backdrop-blur">
-      <div className="text-muted-foreground border-b px-2.5 py-1.5 font-medium">
-        Atividade ao vivo
-      </div>
+      <div className="text-muted-foreground border-b px-2.5 py-1.5 font-medium">Atividade ao vivo</div>
       <ul className="max-h-32 overflow-y-auto">
         {feed.slice(0, 12).map((c, i) => (
           <li key={`${c.uid}-${c.at}-${i}`}>
-            <button
-              className="hover:bg-accent flex w-full items-center gap-2 px-2.5 py-1 text-left"
-              onClick={() => onPick(c)}
-            >
+            <button className="hover:bg-accent flex w-full items-center gap-2 px-2.5 py-1 text-left" onClick={() => onPick(c)}>
               <span
                 className={cn(
                   "size-1.5 shrink-0 rounded-full",
@@ -611,23 +394,10 @@ function ActivityFeed({
                         : "bg-primary",
                 )}
               />
-              <span className="text-muted-foreground shrink-0 tabular-nums">
-                {new Date(c.at).toLocaleTimeString("pt-BR")}
-              </span>
+              <span className="text-muted-foreground shrink-0 tabular-nums">{new Date(c.at).toLocaleTimeString("pt-BR")}</span>
               <span className="truncate">
-                {c.kind === "node"
-                  ? "Nó"
-                  : c.kind === "service"
-                    ? "Service"
-                    : "Pod"}{" "}
-                <b className="font-medium">{c.name}</b> {actionText[c.action]}{" "}
-                {c.detail && (
-                  <span className="text-muted-foreground">
-                    {c.action === "added" && c.kind === "pod"
-                      ? `em ${c.detail}`
-                      : c.detail}
-                  </span>
-                )}
+                {c.kind === "node" ? "Nó" : c.kind === "service" ? "Service" : "Pod"} <b className="font-medium">{c.name}</b> {actionText[c.action]}{" "}
+                {c.detail && <span className="text-muted-foreground">{c.action === "added" && c.kind === "pod" ? `em ${c.detail}` : c.detail}</span>}
               </span>
             </button>
           </li>
@@ -637,17 +407,7 @@ function ActivityFeed({
   );
 }
 
-function Tooltip({
-  model,
-  hit,
-  x,
-  y,
-}: {
-  model: TopologyModel;
-  hit: Hit;
-  x: number;
-  y: number;
-}) {
+function Tooltip({ model, hit, x, y }: { model: TopologyModel; hit: Hit; x: number; y: number }) {
   let title = "";
   let sub = "";
   if (hit.kind === "pod") {
@@ -677,34 +437,19 @@ function Tooltip({
   );
 }
 
-function Legend({
-  colorBy,
-  namespaces,
-  scene,
-}: {
-  colorBy: ColorMode;
-  namespaces: string[];
-  scene: TopologyScene | null;
-}) {
+function Legend({ colorBy, namespaces, scene }: { colorBy: ColorMode; namespaces: string[]; scene: TopologyScene | null }) {
   return (
     <div className="space-y-5 text-sm">
-      <p className="text-muted-foreground">
-        Clique em um elemento para ver detalhes. Tudo aqui é atualizado em tempo
-        real pela API do Kubernetes.
-      </p>
+      <p className="text-muted-foreground">Clique em um elemento para ver detalhes. Tudo aqui é atualizado em tempo real pela API do Kubernetes.</p>
       <LegendItem icon={<Server className="size-4" />} title="Nó">
-        Servidor Debian que roda o kubelet. A borda mostra o estado:{" "}
-        <b className="text-success">pronto</b>,{" "}
-        <b className="text-warning">cordoned</b> ou{" "}
-        <b className="text-destructive">NotReady</b>.
+        Servidor Debian que roda o kubelet. A borda mostra o estado: <b className="text-success">pronto</b>, <b className="text-warning">cordoned</b>{" "}
+        ou <b className="text-destructive">NotReady</b>.
       </LegendItem>
       <LegendItem icon={<Box className="size-4" />} title="Pod">
-        Um ou mais containers agendados num nó. Os pods orbitam o nó onde estão
-        rodando e animam ao nascer, mudar de estado ou sair.
+        Um ou mais containers agendados num nó. Os pods orbitam o nó onde estão rodando e animam ao nascer, mudar de estado ou sair.
       </LegendItem>
       <LegendItem icon={<Diamond className="size-4" />} title="Service">
-        Endereço estável que balanceia tráfego entre os pods que casam com o
-        seletor. As partículas indicam o caminho do tráfego.
+        Endereço estável que balanceia tráfego entre os pods que casam com o seletor. As partículas indicam o caminho do tráfego.
       </LegendItem>
       {colorBy === "status" ? (
         <div className="space-y-1.5">
@@ -726,14 +471,9 @@ function Legend({
           <div className="font-medium">Namespaces</div>
           {namespaces.map((ns) => (
             <div key={ns} className="flex items-center gap-2">
-              <span
-                className="size-3 rounded-full"
-                style={{ background: scene?.namespaceColor(ns) }}
-              />
+              <span className="size-3 rounded-full" style={{ background: scene?.namespaceColor(ns) }} />
               {ns}
-              {SYSTEM_NAMESPACES.has(ns) && (
-                <span className="text-muted-foreground text-xs">(sistema)</span>
-              )}
+              {SYSTEM_NAMESPACES.has(ns) && <span className="text-muted-foreground text-xs">(sistema)</span>}
             </div>
           ))}
         </div>
@@ -742,21 +482,11 @@ function Legend({
   );
 }
 
-function LegendItem({
-  icon,
-  title,
-  children,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  children: React.ReactNode;
-}) {
+function LegendItem({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-1 flex items-center gap-2 font-medium">
-        <span className="bg-primary/10 text-primary flex size-7 items-center justify-center rounded-full">
-          {icon}
-        </span>
+        <span className="bg-primary/10 text-primary flex size-7 items-center justify-center rounded-full">{icon}</span>
         {title}
       </div>
       <p className="text-muted-foreground">{children}</p>
@@ -779,11 +509,7 @@ function Labels({ labels }: { labels?: Record<string, string> }) {
   return (
     <div className="flex flex-wrap gap-1">
       {entries.map(([k, v]) => (
-        <Badge
-          key={k}
-          variant="secondary"
-          className="max-w-full font-mono text-[10px] break-all whitespace-normal"
-        >
+        <Badge key={k} variant="secondary" className="max-w-full font-mono text-[10px] break-all whitespace-normal">
           {k}={v}
         </Badge>
       ))}
@@ -792,24 +518,9 @@ function Labels({ labels }: { labels?: Record<string, string> }) {
 }
 
 /** `version` only forces a re-render when the live model changes. */
-function Details({
-  model,
-  hit,
-  onSelect,
-}: {
-  model: TopologyModel;
-  hit: Hit;
-  onSelect: (h: Hit | null) => void;
-  version: number;
-}) {
+function Details({ model, hit, onSelect }: { model: TopologyModel; hit: Hit; onSelect: (h: Hit | null) => void; version: number }) {
   const close = (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-7"
-      onClick={() => onSelect(null)}
-      aria-label="Fechar"
-    >
+    <Button variant="ghost" size="icon" className="size-7" onClick={() => onSelect(null)} aria-label="Fechar">
       <X />
     </Button>
   );
@@ -818,12 +529,7 @@ function Details({
     if (!n) return <Gone close={close} />;
     const pods = [...model.pods.values()].filter((p) => p.node === n.name);
     return (
-      <DetailShell
-        icon={<Server className="size-4" />}
-        kind="Nó"
-        name={n.name}
-        close={close}
-      >
+      <DetailShell icon={<Server className="size-4" />} kind="Nó" name={n.name} close={close}>
         <Row k="Estado">
           <NodeBadge n={n} />
         </Row>
@@ -855,9 +561,7 @@ function Details({
             ))}
           </Row>
         )}
-        {!!n.conditions?.length && (
-          <Row k="Alertas">{n.conditions.join(", ")}</Row>
-        )}
+        {!!n.conditions?.length && <Row k="Alertas">{n.conditions.join(", ")}</Row>}
         <Row k="Idade">{age(n.created)}</Row>
         <PodList pods={pods} onSelect={onSelect} />
       </DetailShell>
@@ -869,22 +573,14 @@ function Details({
     const node = [...model.nodes.values()].find((n) => n.name === p.node);
     const svcs = [...model.services.values()].filter((s) => selects(s, p));
     return (
-      <DetailShell
-        icon={<Box className="size-4" />}
-        kind="Pod"
-        name={p.name}
-        close={close}
-      >
+      <DetailShell icon={<Box className="size-4" />} kind="Pod" name={p.name} close={close}>
         <Row k="Estado">
           <PodBadge p={p} />
         </Row>
         <Row k="Namespace">{p.namespace}</Row>
         <Row k="Nó">
           {node ? (
-            <button
-              className="text-primary hover:underline"
-              onClick={() => onSelect({ kind: "node", uid: node.uid })}
-            >
+            <button className="text-primary hover:underline" onClick={() => onSelect({ kind: "node", uid: node.uid })}>
               {node.name}
             </button>
           ) : (
@@ -914,11 +610,7 @@ function Details({
         <Row k="Services">
           {svcs.length ? (
             svcs.map((s) => (
-              <button
-                key={s.uid}
-                className="text-primary block hover:underline"
-                onClick={() => onSelect({ kind: "service", uid: s.uid })}
-              >
+              <button key={s.uid} className="text-primary block hover:underline" onClick={() => onSelect({ kind: "service", uid: s.uid })}>
                 {s.name}
               </button>
             ))
@@ -936,12 +628,7 @@ function Details({
   if (!s) return <Gone close={close} />;
   const pods = [...model.pods.values()].filter((p) => selects(s, p));
   return (
-    <DetailShell
-      icon={<Diamond className="size-4" />}
-      kind="Service"
-      name={s.name}
-      close={close}
-    >
+    <DetailShell icon={<Diamond className="size-4" />} kind="Service" name={s.name} close={close}>
       <Row k="Namespace">{s.namespace}</Row>
       <Row k="Tipo">{s.type}</Row>
       <Row k="Cluster IP">
@@ -980,9 +667,7 @@ function DetailShell({
   return (
     <div>
       <div className="mb-3 flex items-start gap-2">
-        <span className="bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-full">
-          {icon}
-        </span>
+        <span className="bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-full">{icon}</span>
         <div className="min-w-0 flex-1">
           <div className="text-muted-foreground text-xs">{kind}</div>
           <div className="font-semibold break-all">{name}</div>
@@ -997,33 +682,19 @@ function DetailShell({
 function Gone({ close }: { close: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-2 text-sm">
-      <p className="text-muted-foreground">
-        Este objeto não existe mais no cluster.
-      </p>
+      <p className="text-muted-foreground">Este objeto não existe mais no cluster.</p>
       {close}
     </div>
   );
 }
 
-function PodList({
-  pods,
-  onSelect,
-}: {
-  pods: K8sPod[];
-  onSelect: (h: Hit) => void;
-}) {
+function PodList({ pods, onSelect }: { pods: K8sPod[]; onSelect: (h: Hit) => void }) {
   return (
     <div className="pt-3">
-      <div className="text-muted-foreground mb-1 text-xs">
-        Pods ({pods.length})
-      </div>
+      <div className="text-muted-foreground mb-1 text-xs">Pods ({pods.length})</div>
       <ul className="space-y-0.5">
         {pods
-          .sort(
-            (a, b) =>
-              a.namespace.localeCompare(b.namespace) ||
-              a.name.localeCompare(b.name),
-          )
+          .sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name))
           .map((p) => (
             <li key={p.uid}>
               <button
@@ -1032,9 +703,7 @@ function PodList({
               >
                 <HealthDot p={p} />
                 <span className="truncate">{p.name}</span>
-                <span className="text-muted-foreground ml-auto shrink-0">
-                  {p.namespace}
-                </span>
+                <span className="text-muted-foreground ml-auto shrink-0">{p.namespace}</span>
               </button>
             </li>
           ))}
@@ -1049,13 +718,7 @@ function HealthDot({ p }: { p: K8sPod }) {
     <span
       className={cn(
         "size-2 shrink-0 rounded-full",
-        h === "ok"
-          ? "bg-success"
-          : h === "pending"
-            ? "bg-warning"
-            : h === "problem"
-              ? "bg-destructive"
-              : "bg-muted-foreground",
+        h === "ok" ? "bg-success" : h === "pending" ? "bg-warning" : h === "problem" ? "bg-destructive" : "bg-muted-foreground",
       )}
     />
   );
