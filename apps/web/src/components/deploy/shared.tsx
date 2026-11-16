@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { CheckCircle2, CircleAlert, CircleDashed, Loader2, MinusCircle, PencilLine, Trash2 } from "lucide-react";
-import type { ApplySummary, DeleteRequest, Job } from "@/lib/api";
+import type { ApplySummary, DeleteRequest, Job, ObjectRef } from "@/lib/api";
 import { api, jobKindLabel } from "@/lib/api";
 import { JobStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+const systemNS = new Set(["kube-system", "kube-public", "kube-node-lease"]);
+
+/** Objects the backend refuses to delete (cluster plumbing). */
+export function isProtected(r: ObjectRef) {
+  return systemNS.has(r.namespace ?? "") || (r.kind === "Service" && r.namespace === "default" && r.name === "kubernetes");
+}
+
+/** Trailing table cell with a delete button (empty for protected objects). */
+export function DeleteCell({ target, onDelete }: { target: ObjectRef; onDelete: (r: ObjectRef) => void }) {
+  if (isProtected(target)) return <TableCell />;
+  return (
+    <TableCell className="text-right">
+      <Button variant="ghost" size="icon" title={`Excluir ${target.kind} ${target.name}`} onClick={() => onDelete(target)}>
+        <Trash2 className="text-destructive" />
+      </Button>
+    </TableCell>
+  );
+}
 
 const LazyYamlEditor = lazy(() => import("@/components/deploy/YamlEditor"));
 
@@ -173,6 +192,7 @@ export function DeleteDialog({
   open,
   onOpenChange,
   onDeleted,
+  extra,
 }: {
   clusterId: string;
   request: DeleteRequest;
@@ -181,6 +201,8 @@ export function DeleteDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onDeleted?: () => void;
+  /** Options shown above the dry-run result (changing request re-runs it). */
+  extra?: ReactNode;
 }) {
   const qc = useQueryClient();
   const [typed, setTyped] = useState("");
@@ -192,14 +214,16 @@ export function DeleteDialog({
       onDeleted?.();
     },
   });
+  const reqKey = JSON.stringify(request);
   useEffect(() => {
     if (open) {
-      setTyped("");
       run.reset();
       check.mutate();
+    } else {
+      setTyped("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, reqKey]);
   const toDelete = check.data?.results.filter((r) => r.action === "deleted").length ?? 0;
   const done = run.data;
   return (
@@ -212,6 +236,7 @@ export function DeleteDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[50vh] space-y-3 overflow-y-auto">
+          {!done && extra}
           {check.isPending && (
             <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <Loader2 className="size-4 animate-spin" /> Verificando o que será excluído…

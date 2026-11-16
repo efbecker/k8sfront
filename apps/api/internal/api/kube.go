@@ -100,6 +100,34 @@ func (s *Server) kubeWorkloads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// workloadRelated lists the Services/Ingresses that only serve one workload,
+// offered for deletion together with it.
+func (s *Server) workloadRelated(w http.ResponseWriter, r *http.Request) {
+	ns, kind, name := r.PathValue("ns"), r.PathValue("kind"), r.PathValue("name")
+	if !namespaceRe.MatchString(ns) || name == "" {
+		writeError(w, http.StatusBadRequest, "validation", "namespace ou nome inválido")
+		return
+	}
+	switch kind {
+	case "Deployment", "StatefulSet", "DaemonSet":
+	default:
+		writeError(w, http.StatusBadRequest, "validation", "tipo de workload inválido")
+		return
+	}
+	cl, ok := s.kubeCluster(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), kube.RequestTimeout)
+	defer cancel()
+	out, err := kube.RelatedObjects(ctx, cl.Client, ns, kind, name)
+	if err != nil {
+		s.kubeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) kubeNetwork(w http.ResponseWriter, r *http.Request) {
 	ns, ok := namespaceParam(w, r)
 	if !ok {

@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	priv("GET /api/v1/clusters/{id}/k8s/overview", s.kubeOverview)
 	priv("GET /api/v1/clusters/{id}/k8s/namespaces", s.kubeNamespaces)
 	priv("GET /api/v1/clusters/{id}/k8s/workloads", s.kubeWorkloads)
+	priv("GET /api/v1/clusters/{id}/k8s/workloads/{ns}/{kind}/{name}/related", s.workloadRelated)
 	priv("GET /api/v1/clusters/{id}/k8s/network", s.kubeNetwork)
 	priv("GET /api/v1/clusters/{id}/k8s/topology/stream", s.topologyStream)
 	priv("POST /api/v1/clusters/{id}/k8s/nodes/{name}/cordon", s.cordonNode)

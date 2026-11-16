@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api, type K8sWorkload, type ObjectRef } from "@/lib/api";
-import { DeleteDialog } from "@/components/deploy/shared";
-import { Button } from "@/components/ui/button";
+import { DeleteCell, DeleteDialog } from "@/components/deploy/shared";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { age, Empty, PodBadge } from "@/components/cluster/k8s";
@@ -24,16 +23,36 @@ function ReadyBadge({ w }: { w: K8sWorkload }) {
   );
 }
 
-const systemNS = new Set(["kube-system", "kube-public", "kube-node-lease"]);
-
-function DeleteCell({ target, onDelete }: { target: ObjectRef; onDelete: (r: ObjectRef) => void }) {
-  if (systemNS.has(target.namespace ?? "")) return <TableCell />;
+/** Deleting a workload offers the Services/Ingresses that only serve it. */
+function WorkloadDelete({ clusterId, target, onClose }: { clusterId: string; target: ObjectRef; onClose: () => void }) {
+  const isPod = target.kind === "Pod";
+  const related = useQuery({
+    queryKey: ["related", clusterId, target.namespace, target.kind, target.name],
+    queryFn: () => api.workloadRelated(clusterId, target.namespace ?? "", target.kind, target.name),
+    enabled: !isPod,
+  });
+  const [withRelated, setWithRelated] = useState(true);
+  const rel = related.data ?? [];
+  const objects = withRelated ? [target, ...rel] : [target];
   return (
-    <TableCell className="text-right">
-      <Button variant="ghost" size="icon" title={`Excluir ${target.kind} ${target.name}`} onClick={() => onDelete(target)}>
-        <Trash2 className="text-destructive" />
-      </Button>
-    </TableCell>
+    <DeleteDialog
+      clusterId={clusterId}
+      request={{ objects }}
+      title={`Excluir ${target.kind} ${target.namespace}/${target.name}?`}
+      confirmWord={target.name}
+      open
+      onOpenChange={(o) => !o && onClose()}
+      extra={
+        rel.length > 0 && (
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm">
+            <input type="checkbox" className="accent-primary mt-0.5 size-4" checked={withRelated} onChange={(e) => setWithRelated(e.target.checked)} />
+            <span>
+              Excluir também o que só serve a este {target.kind}: {rel.map((r) => `${r.kind} ${r.name}`).join(", ")}
+            </span>
+          </label>
+        )
+      }
+    />
   );
 }
 
@@ -153,16 +172,7 @@ export function ClusterWorkloadsPage() {
           </CardContent>
         </Card>
       )}
-      {del && (
-        <DeleteDialog
-          clusterId={id}
-          request={{ objects: [del] }}
-          title={`Excluir ${del.kind} ${del.namespace}/${del.name}?`}
-          confirmWord={del.name}
-          open={!!del}
-          onOpenChange={(o) => !o && setDel(undefined)}
-        />
-      )}
+      {del && <WorkloadDelete clusterId={id} target={del} onClose={() => setDel(undefined)} />}
     </>
   );
 }

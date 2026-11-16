@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Lock, Star } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type ObjectRef } from "@/lib/api";
+import { DeleteCell, DeleteDialog } from "@/components/deploy/shared";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { age, Empty } from "@/components/cluster/k8s";
@@ -16,6 +17,7 @@ export function ClusterNetworkPage() {
   const { id = "" } = useParams();
   const [ns, setNs] = useState("");
   const [tab, setTab] = useState<Tab>("services");
+  const [del, setDel] = useState<ObjectRef>();
   const data = useQuery({ queryKey: ["network", id, ns], queryFn: () => api.network(id, ns), refetchInterval: 15_000 });
   const d = data.data;
   const statusVariant = (s: string) => (s === "Bound" ? "success" : s === "Pending" || s === "Available" ? "warning" : s ? "destructive" : "secondary");
@@ -59,6 +61,7 @@ export function ClusterNetworkPage() {
                       <TableHead>Portas</TableHead>
                       <TableHead>Seletor</TableHead>
                       <TableHead>Idade</TableHead>
+                      <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -80,9 +83,10 @@ export function ClusterNetworkPage() {
                             .join(", ") || "—"}
                         </TableCell>
                         <TableCell className="text-muted-foreground text-sm">{age(s.created)}</TableCell>
+                        <DeleteCell target={{ apiVersion: "v1", kind: "Service", namespace: s.namespace, name: s.name }} onDelete={setDel} />
                       </TableRow>
                     ))}
-                    {d.services.length === 0 && <Empty cols={7} />}
+                    {d.services.length === 0 && <Empty cols={8} />}
                   </TableBody>
                 </Table>
               )}
@@ -95,6 +99,7 @@ export function ClusterNetworkPage() {
                       <TableHead>Hosts</TableHead>
                       <TableHead>Endereço</TableHead>
                       <TableHead>Idade</TableHead>
+                      <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -110,9 +115,10 @@ export function ClusterNetworkPage() {
                         <TableCell className="font-mono text-xs">{i.hosts.join(", ") || "*"}</TableCell>
                         <TableCell className="font-mono text-xs">{i.address.join(", ") || "—"}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">{age(i.created)}</TableCell>
+                        <DeleteCell target={{ apiVersion: "networking.k8s.io/v1", kind: "Ingress", namespace: i.namespace, name: i.name }} onDelete={setDel} />
                       </TableRow>
                     ))}
-                    {d.ingresses.length === 0 && <Empty cols={5} />}
+                    {d.ingresses.length === 0 && <Empty cols={6} />}
                   </TableBody>
                 </Table>
               )}
@@ -127,6 +133,7 @@ export function ClusterNetworkPage() {
                       <TableHead>Acesso</TableHead>
                       <TableHead>Volume</TableHead>
                       <TableHead>Idade</TableHead>
+                      <TableHead className="w-12" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -144,9 +151,10 @@ export function ClusterNetworkPage() {
                         <TableCell className="text-xs">{c.accessModes.join(", ")}</TableCell>
                         <TableCell className="font-mono text-xs">{c.volume || "—"}</TableCell>
                         <TableCell className="text-muted-foreground text-sm">{age(c.created)}</TableCell>
+                        <DeleteCell target={{ apiVersion: "v1", kind: "PersistentVolumeClaim", namespace: c.namespace, name: c.name }} onDelete={setDel} />
                       </TableRow>
                     ))}
-                    {d.pvcs.length === 0 && <Empty cols={7} />}
+                    {d.pvcs.length === 0 && <Empty cols={8} />}
                   </TableBody>
                 </Table>
               )}
@@ -223,6 +231,16 @@ export function ClusterNetworkPage() {
             </CardContent>
           </Card>
         )
+      )}
+      {del && (
+        <DeleteDialog
+          clusterId={id}
+          request={{ objects: [del] }}
+          title={`Excluir ${del.kind} ${del.namespace}/${del.name}?`}
+          confirmWord={del.name}
+          open
+          onOpenChange={(o) => !o && setDel(undefined)}
+        />
       )}
     </>
   );

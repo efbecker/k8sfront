@@ -520,6 +520,8 @@ export const api = {
   deployApp: (id: string, app: AppSpec, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/deploy/app`, { app, dryRun }),
   applyManifest: (id: string, manifest: string, namespace: string, dryRun: boolean) =>
     request<ApplySummary>("POST", `/clusters/${id}/apply`, { manifest, namespace, dryRun }),
+  workloadRelated: (id: string, ns: string, kind: string, name: string) =>
+    request<ObjectRef[]>("GET", `/clusters/${id}/k8s/workloads/${encodeURIComponent(ns)}/${kind}/${encodeURIComponent(name)}/related`),
   deleteObjects: (id: string, req: DeleteRequest, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/delete`, { ...req, dryRun }),
   helmReleases: (id: string) => request<HelmRelease[]>("GET", `/clusters/${id}/helm/releases`),
   helm: (id: string, input: HelmInput) => request<Job>("POST", `/clusters/${id}/helm`, input),

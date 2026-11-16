@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -89,6 +90,9 @@ func (a *Applier) Delete(ctx context.Context, objs []*unstructured.Unstructured,
 				if protectedNS[res.Namespace] {
 					return fmt.Errorf("o namespace %s é do sistema e não pode ser alterado por aqui", res.Namespace)
 				}
+				if mapping.Resource.Group == "" && mapping.Resource.Resource == "services" && res.Namespace == "default" && u.GetName() == "kubernetes" {
+					return errors.New("o Service default/kubernetes é a própria API do cluster e não pode ser excluído")
+				}
 				ri = a.Dynamic.Resource(mapping.Resource).Namespace(res.Namespace)
 			} else {
 				res.Namespace = ""
@@ -115,8 +119,11 @@ func (a *Applier) Delete(ctx context.Context, objs []*unstructured.Unstructured,
 				return err
 			}
 			res.Action = "deleted"
-			if mapping.Resource.Group == "" && mapping.Resource.Resource == "namespaces" {
+			switch {
+			case mapping.Resource.Group == "" && mapping.Resource.Resource == "namespaces":
 				res.Note = "tudo o que estiver dentro do namespace também é excluído"
+			case mapping.Resource.Group == "" && mapping.Resource.Resource == "persistentvolumeclaims":
+				res.Note = "os dados do volume podem ser apagados, conforme a reclaim policy da StorageClass"
 			}
 			return nil
 		}()
