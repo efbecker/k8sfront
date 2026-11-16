@@ -323,9 +323,25 @@ export interface ApplyResult {
   kind: string;
   namespace?: string;
   name: string;
-  action: "created" | "configured" | "unchanged" | "error";
+  action: "created" | "configured" | "unchanged" | "deleted" | "absent" | "error";
   error?: string;
   note?: string;
+}
+
+export interface ObjectRef {
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+
+/** What to delete: a manifest, an explicit list, or a form app. */
+export interface DeleteRequest {
+  manifest?: string;
+  objects?: ObjectRef[];
+  app?: AppSpec;
+  namespace?: string;
+  keepNamespaces?: boolean;
 }
 
 export interface ApplySummary {
@@ -504,6 +520,7 @@ export const api = {
   deployApp: (id: string, app: AppSpec, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/deploy/app`, { app, dryRun }),
   applyManifest: (id: string, manifest: string, namespace: string, dryRun: boolean) =>
     request<ApplySummary>("POST", `/clusters/${id}/apply`, { manifest, namespace, dryRun }),
+  deleteObjects: (id: string, req: DeleteRequest, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/delete`, { ...req, dryRun }),
   helmReleases: (id: string) => request<HelmRelease[]>("GET", `/clusters/${id}/helm/releases`),
   helm: (id: string, input: HelmInput) => request<Job>("POST", `/clusters/${id}/helm`, input),
 

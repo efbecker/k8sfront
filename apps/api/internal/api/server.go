@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	priv("POST /api/v1/deploy/render", s.renderApp)
 	priv("POST /api/v1/clusters/{id}/deploy/app", s.deployApp)
 	priv("POST /api/v1/clusters/{id}/apply", s.applyManifest)
+	priv("POST /api/v1/clusters/{id}/delete", s.deleteObjects)
 	priv("GET /api/v1/clusters/{id}/helm/releases", s.helmReleases)
 	priv("POST /api/v1/clusters/{id}/helm", s.helmJob)
 

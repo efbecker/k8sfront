@@ -250,3 +250,67 @@ metadata: {name: teste}
 		t.Fatalf("failed = %d (%+v)", sum.Failed, sum.Results)
 	}
 }
+
+func TestDeleteOrderAndProtection(t *testing.T) {
+	scheme := runtime.NewScheme()
+	gvrs := map[schema.GroupVersionResource]string{
+		{Version: "v1", Resource: "namespaces"}:                 "NamespaceList",
+		{Version: "v1", Resource: "configmaps"}:                 "ConfigMapList",
+		{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
+	}
+	obj := func(apiVersion, kind, ns, name string) runtime.Object {
+		u := &unstructured.Unstructured{}
+		u.SetAPIVersion(apiVersion)
+		u.SetKind(kind)
+		u.SetNamespace(ns)
+		u.SetName(name)
+		return u
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, gvrs,
+		obj("v1", "Namespace", "", "teste"),
+		obj("apps/v1", "Deployment", "teste", "web"),
+		obj("v1", "ConfigMap", "kube-system", "coredns"),
+	)
+	var deleted []string
+	dyn.PrependReactor("delete", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		da := action.(k8stesting.DeleteAction)
+		deleted = append(deleted, da.GetResource().Resource+"/"+da.GetName())
+		return false, nil, nil
+	})
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}, meta.RESTScopeRoot)
+	mapper.Add(schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, meta.RESTScopeNamespace)
+	mapper.Add(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, meta.RESTScopeNamespace)
+	objs, err := FromRefs([]ObjectRef{
+		{APIVersion: "v1", Kind: "Namespace", Name: "teste"},
+		{APIVersion: "apps/v1", Kind: "Deployment", Namespace: "teste", Name: "web"},
+		{APIVersion: "v1", Kind: "ConfigMap", Namespace: "teste", Name: "gone"},
+		{APIVersion: "v1", Kind: "ConfigMap", Namespace: "kube-system", Name: "coredns"},
+		{APIVersion: "v1", Kind: "Namespace", Name: "kube-system"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Applier{Dynamic: dyn, Mapper: resettable{mapper}}
+	sum := a.Delete(context.Background(), objs, "default", false)
+	got := map[string]string{}
+	for _, r := range sum.Results {
+		got[r.Kind+"/"+r.Namespace+"/"+r.Name] = r.Action
+	}
+	want := map[string]string{
+		"Namespace//teste": "deleted", "Deployment/teste/web": "deleted", "ConfigMap/teste/gone": "absent",
+		"ConfigMap/kube-system/coredns": "error", "Namespace//kube-system": "error",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s = %q, want %q (%+v)", k, got[k], v, sum.Results)
+		}
+	}
+	// Namespaces go last; system objects are never sent to the API.
+	if len(deleted) != 2 || deleted[1] != "namespaces/teste" {
+		t.Fatalf("deleted %v", deleted)
+	}
+	if _, err := FromRefs(nil); !errors.Is(err, ErrInvalid) {
+		t.Fatal("empty refs accepted")
+	}
+}

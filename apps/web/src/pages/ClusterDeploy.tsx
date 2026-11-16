@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { Empty } from "@/components/cluster/k8s";
-import { ApplyResults, ConfirmButton, ErrorText, Field, JobLink, YamlEditor } from "@/components/deploy/shared";
+import { ApplyResults, ConfirmButton, DeleteDialog, ErrorText, Field, JobLink, YamlEditor } from "@/components/deploy/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,6 +70,7 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
   const [app, setApp] = useState<AppSpec>(emptyApp);
   const [result, setResult] = useState<ApplySummary>();
   const [validated, setValidated] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const set = (patch: Partial<AppSpec>) => setApp((a) => ({ ...a, ...patch }));
   const key = JSON.stringify(app);
 
@@ -292,7 +293,18 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
                   <FileCode2 /> Abrir no editor YAML
                 </Button>
               )}
+              <Button variant="ghost" className="text-destructive ml-auto" disabled={!app.name || !app.image} onClick={() => setDeleting(true)}>
+                <Trash2 /> Excluir aplicação
+              </Button>
             </div>
+            <DeleteDialog
+              clusterId={clusterId}
+              request={{ app }}
+              title={`Excluir a aplicação ${app.name} de ${app.namespace || "default"}?`}
+              confirmWord={app.name}
+              open={deleting}
+              onOpenChange={setDeleting}
+            />
             {validated !== key && <p className="text-muted-foreground text-xs">“Aplicar” libera depois de um dry-run sem erros do formulário atual.</p>}
             <ErrorText error={preview.error ?? run.error} />
             {preview.data && <YamlEditor value={preview.data.yaml} readOnly height={420} />}
@@ -318,6 +330,8 @@ function YamlTab({ clusterId, text, setText }: { clusterId: string; text: string
   const [ns, setNs] = useState("");
   const [result, setResult] = useState<ApplySummary>();
   const [validated, setValidated] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [keepNs, setKeepNs] = useState(false);
   const key = ns + "\u0000" + text;
   const run = useMutation({
     mutationFn: (dryRun: boolean) => api.applyManifest(clusterId, text, ns, dryRun),
@@ -351,7 +365,21 @@ function YamlTab({ clusterId, text, setText }: { clusterId: string; text: string
               <Play /> Aplicar
             </ConfirmButton>
             {validated !== key && <span className="text-muted-foreground text-xs">Aplicar libera após um dry-run sem erros deste conteúdo.</span>}
+            <div className="ml-auto flex items-center gap-3">
+              <Toggle on={keepNs} onChange={setKeepNs} label="Manter namespaces" />
+              <Button variant="ghost" className="text-destructive" disabled={!text.trim()} onClick={() => setDeleting(true)}>
+                <Trash2 /> Excluir objetos do manifesto
+              </Button>
+            </div>
           </div>
+          <DeleteDialog
+            clusterId={clusterId}
+            request={{ manifest: text, namespace: ns, keepNamespaces: keepNs }}
+            title="Excluir os objetos deste manifesto?"
+            confirmWord="excluir"
+            open={deleting}
+            onOpenChange={setDeleting}
+          />
           <ErrorText error={run.error} />
           <YamlEditor value={text} onChange={setText} height={520} />
         </CardContent>

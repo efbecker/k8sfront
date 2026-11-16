@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
-import { api, type K8sWorkload } from "@/lib/api";
+import { Loader2, Trash2 } from "lucide-react";
+import { api, type K8sWorkload, type ObjectRef } from "@/lib/api";
+import { DeleteDialog } from "@/components/deploy/shared";
+import { Button } from "@/components/ui/button";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { age, Empty, PodBadge } from "@/components/cluster/k8s";
@@ -22,11 +24,25 @@ function ReadyBadge({ w }: { w: K8sWorkload }) {
   );
 }
 
+const systemNS = new Set(["kube-system", "kube-public", "kube-node-lease"]);
+
+function DeleteCell({ target, onDelete }: { target: ObjectRef; onDelete: (r: ObjectRef) => void }) {
+  if (systemNS.has(target.namespace ?? "")) return <TableCell />;
+  return (
+    <TableCell className="text-right">
+      <Button variant="ghost" size="icon" title={`Excluir ${target.kind} ${target.name}`} onClick={() => onDelete(target)}>
+        <Trash2 className="text-destructive" />
+      </Button>
+    </TableCell>
+  );
+}
+
 export function ClusterWorkloadsPage() {
   const { id = "" } = useParams();
   const [ns, setNs] = useState("");
   const [tab, setTab] = useState<Tab>("Deployment");
   const [q, setQ] = useState("");
+  const [del, setDel] = useState<ObjectRef>();
   const data = useQuery({ queryKey: ["workloads", id, ns], queryFn: () => api.workloads(id, ns), refetchInterval: 10_000 });
   const filter = (name: string) => !q || name.toLowerCase().includes(q.toLowerCase());
   const wl = (data.data?.workloads ?? []).filter((w) => w.kind === tab && filter(w.name));
@@ -65,6 +81,7 @@ export function ClusterWorkloadsPage() {
                     <TableHead>Nó</TableHead>
                     <TableHead>IP</TableHead>
                     <TableHead>Idade</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -87,9 +104,10 @@ export function ClusterWorkloadsPage() {
                       <TableCell className="text-sm">{p.node || "—"}</TableCell>
                       <TableCell className="font-mono text-xs">{p.ip || "—"}</TableCell>
                       <TableCell className="text-muted-foreground text-sm">{age(p.created)}</TableCell>
+                      <DeleteCell target={{ apiVersion: "v1", kind: "Pod", namespace: p.namespace, name: p.name }} onDelete={setDel} />
                     </TableRow>
                   ))}
-                  {pods.length === 0 && <Empty cols={7} />}
+                  {pods.length === 0 && <Empty cols={8} />}
                 </TableBody>
               </Table>
             ) : (
@@ -102,6 +120,7 @@ export function ClusterWorkloadsPage() {
                     <TableHead>Disponíveis</TableHead>
                     <TableHead>Imagens</TableHead>
                     <TableHead>Idade</TableHead>
+                    <TableHead className="w-12" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -124,14 +143,25 @@ export function ClusterWorkloadsPage() {
                         ))}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">{age(w.created)}</TableCell>
+                      <DeleteCell target={{ apiVersion: "apps/v1", kind: w.kind, namespace: w.namespace, name: w.name }} onDelete={setDel} />
                     </TableRow>
                   ))}
-                  {wl.length === 0 && <Empty cols={6} />}
+                  {wl.length === 0 && <Empty cols={7} />}
                 </TableBody>
               </Table>
             )}
           </CardContent>
         </Card>
+      )}
+      {del && (
+        <DeleteDialog
+          clusterId={id}
+          request={{ objects: [del] }}
+          title={`Excluir ${del.kind} ${del.namespace}/${del.name}?`}
+          confirmWord={del.name}
+          open={!!del}
+          onOpenChange={(o) => !o && setDel(undefined)}
+        />
       )}
     </>
   );

@@ -285,6 +285,7 @@ sem precisar de clique) com relógio, contadores grandes e a tela mantida acesa 
 | POST | `/deploy/render` | formulário (`AppSpec`) → YAML (Namespace, PVC, Deployment, Service, Ingress); credenciais de registry nunca entram no preview |
 | POST | `/clusters/{id}/deploy/app` | `{app, dryRun}`: renderiza, cria o Secret dockerconfigjson (só aqui) e aplica |
 | POST | `/clusters/{id}/apply` | `{manifest, namespace, dryRun}`: YAML multi-documento (até 200 objetos), Namespaces/CRDs primeiro, server-side apply (`fieldManager=k8sfront`, `force`), `dryRun=All` |
+| POST | `/clusters/{id}/delete` | `{manifest \| objects[] \| app, namespace, keepNamespaces, dryRun}`: exclui em ordem inversa (Namespaces por último, propagação `Background`); resultado `deleted`/`absent`/`error`; nada em `kube-system`, `kube-public`, `kube-node-lease` (nem o namespace `default`). A UI sempre roda o dry-run antes e pede o nome digitado; auditado como `deploy.delete` |
 | GET | `/clusters/{id}/helm/releases` | releases pelos **metadados** dos Secrets `owner=helm` (o payload com values nunca é lido) |
 | POST | `/clusters/{id}/helm` | job `cluster.helm`: `helm upgrade --install --wait` ou `uninstall` no CP primário; values cifrados no cofre (`helm_values`) e apagados no sucesso |
 

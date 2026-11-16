@@ -136,6 +136,9 @@ func TestDeployAPI(t *testing.T) {
 	if code := call(t, ts, "POST", "/api/v1/clusters/c1/apply", map[string]any{"manifest": "kind: x"}, &e); code != 400 {
 		t.Fatalf("invalid manifest: %d", code)
 	}
+	if code := call(t, ts, "POST", "/api/v1/clusters/c1/delete", map[string]any{"objects": []any{}}, &e); code != 400 || e.Error != "validation" {
+		t.Fatalf("empty delete: %d %+v", code, e)
+	}
 
 	var job store.Job
 	in := map[string]any{"release": "redis", "namespace": "cache", "chart": "redis", "repo": "https://charts.example.com", "values": "auth:\n  password: topsecret\n"}

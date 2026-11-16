@@ -142,6 +142,72 @@ func (s *Server) applyManifest(w http.ResponseWriter, r *http.Request) {
 	s.finishApply(w, r, "deploy.apply", objs, a.Apply(ctx, objs, in.Namespace, in.DryRun))
 }
 
+// deleteObjects removes the objects of a manifest (the Central de Deploy
+// "Excluir") or an explicit list (a row on Workloads). dryRun validates first.
+func (s *Server) deleteObjects(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Manifest  string             `json:"manifest"`
+		Objects   []deploy.ObjectRef `json:"objects"`
+		App       *deploy.AppSpec    `json:"app"`
+		Namespace string             `json:"namespace"`
+		// KeepNamespaces skips Namespace objects of the manifest.
+		KeepNamespaces bool `json:"keepNamespaces"`
+		DryRun         bool `json:"dryRun"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
+		return
+	}
+	if in.Namespace != "" && !namespaceRe.MatchString(in.Namespace) {
+		writeError(w, http.StatusBadRequest, "validation", "namespace inválido")
+		return
+	}
+	var objs []*unstructured.Unstructured
+	var err error
+	switch {
+	case in.App != nil:
+		// Everything the form generates for this app, pull secret included.
+		if err = in.App.Normalize(); err == nil {
+			objs, _, err = in.App.Render()
+		}
+		if ref := in.App.CreatedPullSecretRef(); err == nil && ref != nil {
+			var sec []*unstructured.Unstructured
+			if sec, err = deploy.FromRefs([]deploy.ObjectRef{*ref}); err == nil {
+				objs = append(objs, sec...)
+			}
+		}
+		in.Namespace = in.App.Namespace
+	case strings.TrimSpace(in.Manifest) != "":
+		objs, err = deploy.Parse(in.Manifest)
+	default:
+		objs, err = deploy.FromRefs(in.Objects)
+	}
+	if err != nil {
+		writeValidation(w, err)
+		return
+	}
+	if in.KeepNamespaces {
+		kept := objs[:0]
+		for _, u := range objs {
+			if !(u.GetKind() == "Namespace" && u.GroupVersionKind().Group == "") {
+				kept = append(kept, u)
+			}
+		}
+		objs = kept
+		if len(objs) == 0 {
+			writeError(w, http.StatusBadRequest, "validation", "nenhum objeto para excluir além dos namespaces")
+			return
+		}
+	}
+	a, ok := s.applier(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), applyTimeout)
+	defer cancel()
+	s.finishApply(w, r, "deploy.delete", objs, a.Delete(ctx, objs, in.Namespace, in.DryRun))
+}
+
 func (s *Server) helmReleases(w http.ResponseWriter, r *http.Request) {
 	ns, ok := namespaceParam(w, r)
 	if !ok {

@@ -386,6 +386,17 @@ func (a *AppSpec) PullSecretObject() (*unstructured.Unstructured, error) {
 	return toUnstructured(sec)
 }
 
+// CreatedPullSecretRef is the registry Secret the form creates from
+// credentials (server + user), for deletion. A Secret referenced only by
+// name was not created by k8sfront and is left alone.
+func (a *AppSpec) CreatedPullSecretRef() *ObjectRef {
+	p := a.PullSecret
+	if p == nil || p.Server == "" || p.Username == "" {
+		return nil
+	}
+	return &ObjectRef{APIVersion: "v1", Kind: "Secret", Namespace: a.Namespace, Name: p.secretName(a.Name)}
+}
+
 func toUnstructured(o runtime.Object) (*unstructured.Unstructured, error) {
 	m, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
 	if err != nil {
