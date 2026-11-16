@@ -55,7 +55,7 @@ func Inspect(ctx context.Context, cs kubernetes.Interface) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := &State{ServerVersion: sv.GitVersion}
+	st := &State{ServerVersion: sv.GitVersion, Nodes: []NodeVersion{}, Checks: []Check{}}
 	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err

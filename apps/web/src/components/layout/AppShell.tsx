@@ -22,6 +22,7 @@ import { ThemeToggle } from "@/components/theme";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/input";
 import { rememberCluster, useActiveCluster } from "@/hooks/useActiveCluster";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface NavItem {
   to: string;
@@ -145,6 +146,7 @@ function Logo() {
 }
 
 export function AppShell() {
+  const { pathname } = useLocation();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const logout = useMutation({
@@ -195,7 +197,9 @@ export function AppShell() {
           </div>
         </header>
         <main className="mx-auto w-full max-w-7xl flex-1 p-4 md:p-6">
-          <Outlet />
+          <ErrorBoundary key={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

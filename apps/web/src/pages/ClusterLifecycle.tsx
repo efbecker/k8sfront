@@ -381,7 +381,7 @@ function OSCard({ id, jobs, members }: { id: string; jobs?: Job[]; members: Serv
   const update = useMutation({ mutationFn: () => api.osUpdate(id, [], policy), onSuccess: onJob });
   const reboot = useMutation({ mutationFn: () => api.rollingReboot(id, []), onSuccess: onJob });
   const last = latest(jobs, "cluster.os-check");
-  const reports = (last?.result as { nodes?: OSNodeReport[] } | undefined)?.nodes ?? [];
+  const reports = ((last?.result as { nodes?: OSNodeReport[] } | undefined)?.nodes ?? []).map((r) => ({ ...r, packages: r.packages ?? [], held: r.held ?? [] }));
   const totalSec = reports.reduce((a, r) => a + r.security, 0);
   const totalPkgs = reports.reduce((a, r) => a + r.packages.length, 0);
 
@@ -524,7 +524,7 @@ function CertsCard({ id, jobs }: { id: string; jobs?: Job[] }) {
   const last = latest(jobs, "cluster.certs", (j) => !!j.result);
   const running = latest(jobs, "cluster.certs", (j) => !isFinal(j.status));
   const res = last?.result as CertsResult | undefined;
-  const certs = res?.nodes.flatMap((n) => n.certs.filter((c) => !c.authority).map((c) => ({ ...c, node: n.name }))) ?? [];
+  const certs = (res?.nodes ?? []).flatMap((n) => (n.certs ?? []).filter((c) => !c.authority).map((c) => ({ ...c, node: n.name }))) ?? [];
   const soonest = certs.reduce<number | undefined>((min, c) => (min === undefined ? daysLeft(c.expires) : Math.min(min, daysLeft(c.expires))), undefined);
 
   return (
@@ -644,6 +644,11 @@ function HistoryCard({ jobs }: { jobs?: Job[] }) {
   );
 }
 
+/** Go encodes empty slices as null: normalise before rendering. */
+function safePlan(p: UpgradePlan): UpgradePlan {
+  return { ...p, nodes: p.nodes ?? [], checks: p.checks ?? [], targets: (p.targets ?? []).map((t) => ({ ...t, hops: t.hops ?? [] })) };
+}
+
 export function ClusterLifecyclePage() {
   const { id = "" } = useParams();
   const jobs = useClusterJobs(id);
@@ -662,8 +667,8 @@ export function ClusterLifecyclePage() {
       ) : (
         plan.data && (
           <div className="space-y-6">
-            <UpgradeCard id={id} plan={plan.data} jobs={jobs.data} />
-            <NodesCard id={id} plan={plan.data} members={members} />
+            <UpgradeCard id={id} plan={safePlan(plan.data)} jobs={jobs.data ?? []} />
+            <NodesCard id={id} plan={safePlan(plan.data)} members={members} />
             <div className="grid gap-6 2xl:grid-cols-2">
               <OSCard id={id} jobs={jobs.data} members={members} />
               <CertsCard id={id} jobs={jobs.data} />

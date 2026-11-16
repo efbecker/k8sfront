@@ -20,7 +20,7 @@ var certLine = regexp.MustCompile(`^(\S+)\s+([A-Z][a-z]{2} \d{1,2}, \d{4} \d{2}:
 // ParseCheckExpiration parses the two tables printed by kubeadm (certificates
 // and certificate authorities). Unknown lines are ignored.
 func ParseCheckExpiration(out string) []Cert {
-	var certs []Cert
+	certs := []Cert{}
 	authority := false
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimRight(line, "\r")
