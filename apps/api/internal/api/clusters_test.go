@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestClusterLifecycleAPI(t *testing.T) {
 	base := map[string]any{"name": "lab", "kubernetesVersion": "v1.37.2", "podCidr": "10.244.0.0/16", "serviceCidr": "10.96.0.0/12",
 		"cni": "cilium", "topology": "multi-node"}
 
-	// Two control planes without a VIP is rejected before anything is stored.
+	// Two control planes (even: no etcd quorum gain) is rejected before anything is stored.
 	bad := map[string]any{}
 	for k, v := range base {
 		bad[k] = v
@@ -108,6 +109,9 @@ func TestClusterLifecycleAPI(t *testing.T) {
 	}
 	if len(cl.Nodes) != 2 || cl.Nodes[0].Role != store.RoleControlPlane || cl.BootstrapJob == nil || cl.BootstrapJob.Status != store.JobPending {
 		t.Fatalf("unexpected cluster view: %+v", cl)
+	}
+	if !strings.Contains(string(cl.Options), `"endpointMode":"local-proxy"`) {
+		t.Fatalf("new clusters default to the local API proxy: %s", cl.Options)
 	}
 
 	// Servers cannot join two clusters.

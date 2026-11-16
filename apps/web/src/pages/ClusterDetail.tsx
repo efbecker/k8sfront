@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, LayoutDashboard, Loader2, Play, RotateCw, Share2, Trash2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, endpointMode, LOCAL_PROXY_ENDPOINT } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
 import { JobRun } from "@/components/JobRun";
@@ -102,10 +102,27 @@ export function ClusterDetailPage() {
 
       <Card className="mb-6">
         <CardContent className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-4 xl:grid-cols-8">
-          <Fact className="col-span-2" k="Endpoint da API" v={<span className="font-mono text-xs">{c.apiServerUrl || c.options.kubeVip?.address || "—"}</span>} />
+          <Fact
+            className="col-span-2"
+            k="Endpoint da API"
+            v={
+              <span className="font-mono text-xs" title={endpointMode(c.options) === "local-proxy" ? `Nos nós: ${LOCAL_PROXY_ENDPOINT}` : undefined}>
+                {c.apiServerUrl || c.options.kubeVip?.address || "—"}
+              </span>
+            }
+          />
           <Fact k="Pod CIDR" v={<span className="font-mono text-xs">{c.podCidr}</span>} />
           <Fact k="Service CIDR" v={<span className="font-mono text-xs">{c.serviceCidr}</span>} />
-          <Fact k="VIP (kube-vip)" v={c.options.kubeVip?.address ?? "não"} />
+          <Fact
+            k="HA da API"
+            v={
+              endpointMode(c.options) === "local-proxy"
+                ? "proxy local"
+                : endpointMode(c.options) === "kube-vip"
+                  ? `VIP ${c.options.kubeVip?.address ?? ""}`
+                  : "direto no CP"
+            }
+          />
           <Fact k="metrics-server" v={c.options.metricsServer ? "sim" : "não"} />
           <Fact k="Workloads no CP" v={c.topology === "single-node" || c.options.untaintControlPlane ? "permitidos" : "não"} />
           <Fact k="Deploy" v={job ? <JobStatusBadge status={job.status} /> : "não iniciado"} />

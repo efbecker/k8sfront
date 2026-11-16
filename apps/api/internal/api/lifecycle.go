@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/efbecker/k8sfront/apps/api/internal/bootstrap"
 	"github.com/efbecker/k8sfront/apps/api/internal/kube"
 	"github.com/efbecker/k8sfront/apps/api/internal/ops"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
@@ -161,13 +162,22 @@ func (s *Server) startUpgrade(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"from": cur.String(), "to": target.Version, "hops": target.Hops})
 }
 
-// addNode attaches a free server as a worker and joins it.
+// addNode attaches a free server as a worker (default) or control plane and joins it.
 func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		ServerID string `json:"serverId"`
+		ServerID string         `json:"serverId"`
+		Role     store.NodeRole `json:"role"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
+		return
+	}
+	switch in.Role {
+	case "":
+		in.Role = store.RoleWorker
+	case store.RoleWorker, store.RoleControlPlane:
+	default:
+		writeError(w, http.StatusBadRequest, "validation", "papel inválido (control-plane ou worker)")
 		return
 	}
 	c, ok := s.readyCluster(w, r)
@@ -200,16 +210,27 @@ func (s *Server) addNode(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, err)
 		return
 	}
-	srv.ClusterID, srv.Role = &c.ID, store.RoleWorker
-	if _, err := ops.SpecFor(c, append(members, *srv)); err != nil {
+	srv.ClusterID, srv.Role = &c.ID, in.Role
+	spec, err := ops.SpecFor(c, append(members, *srv))
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation", err.Error())
 		return
+	}
+	if in.Role == store.RoleControlPlane {
+		if spec.Topology == bootstrap.TopologySingle {
+			writeError(w, http.StatusBadRequest, "validation", "clusters single-node não recebem outros nós")
+			return
+		}
+		if spec.Mode() == bootstrap.EndpointDirect {
+			writeError(w, http.StatusBadRequest, "validation", "este cluster usa o IP do primeiro control plane como endpoint da API; adicionar control planes exige o proxy local ou um VIP (recrie o cluster)")
+			return
+		}
 	}
 	if err := s.Store.UpdateServer(r.Context(), srv); err != nil {
 		s.storeError(w, err)
 		return
 	}
-	s.submitMaintenance(w, r, c, ops.KindNodeAdd, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID}, map[string]any{"server": srv.Name})
+	s.submitMaintenance(w, r, c, ops.KindNodeAdd, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID}, map[string]any{"server": srv.Name, "role": in.Role})
 }
 
 func (s *Server) removeNode(w http.ResponseWriter, r *http.Request) {
@@ -226,11 +247,21 @@ func (s *Server) removeNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation", "o servidor não pertence a este cluster")
 		return
 	}
-	if srv.Role != store.RoleWorker {
-		writeError(w, http.StatusBadRequest, "validation", "só workers podem ser removidos (control planes mantêm o quórum do etcd)")
+	if srv.Role == store.RoleControlPlane {
+		left, err := s.controlPlanesLeft(r.Context(), c.ID, srv.ID)
+		if err != nil {
+			s.storeError(w, err)
+			return
+		}
+		if left == 0 {
+			writeError(w, http.StatusBadRequest, "validation", "não é possível remover o único control plane do cluster")
+			return
+		}
+	} else if srv.Role != store.RoleWorker {
+		writeError(w, http.StatusBadRequest, "validation", "o servidor não tem papel no cluster")
 		return
 	}
-	s.submitMaintenance(w, r, c, ops.KindNodeRemove, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID}, map[string]any{"server": srv.Name})
+	s.submitMaintenance(w, r, c, ops.KindNodeRemove, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID}, map[string]any{"server": srv.Name, "role": srv.Role})
 }
 
 func nodeParam(w http.ResponseWriter, r *http.Request) (string, bool) {

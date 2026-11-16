@@ -142,8 +142,8 @@ func (o *Ops) bootstrap(ctx context.Context, jc *jobs.Context) (err error) {
 		}
 	}()
 
-	jc.Logf(nil, "Cluster %s: Kubernetes %s, CNI %s %s, endpoint %s, %d control plane(s), %d worker(s)",
-		spec.ClusterName, spec.Version, spec.CNI, spec.CNIVersion(), spec.Endpoint(), len(spec.ControlPlanes), len(spec.Workers))
+	jc.Logf(nil, "Cluster %s: Kubernetes %s, CNI %s %s, endpoint %s (%s), %d control plane(s), %d worker(s)",
+		spec.ClusterName, spec.Version, spec.CNI, spec.CNIVersion(), spec.Endpoint(), endpointLabel(spec.Mode()), len(spec.ControlPlanes), len(spec.Workers))
 
 	// 1. Prepare every node in parallel (connect + Debian 13 check + sudo, then
 	//    swap, kernel, containerd, repository, packages, images).
@@ -249,6 +249,27 @@ func (o *Ops) bootstrap(ctx context.Context, jc *jobs.Context) (err error) {
 	return jc.SetResult(context.Background(), BootstrapResult{APIServerURL: cl.APIServerURL, Nodes: nodes})
 }
 
+func endpointLabel(m bootstrap.EndpointMode) string {
+	switch m {
+	case bootstrap.EndpointLocalProxy:
+		return "proxy local em cada nó"
+	case bootstrap.EndpointKubeVIP:
+		return "VIP kube-vip"
+	}
+	return "direto no control plane"
+}
+
+// syncAPIProxy points the local API proxy of every given node at the
+// control planes cps (in parallel; nodes are independent).
+func (b *bootstrapRun) syncAPIProxy(ctx context.Context, nodes, cps []bootstrap.Node, key string) error {
+	if !b.spec.LocalProxy() || len(nodes) == 0 {
+		return nil
+	}
+	return b.parallel(ctx, nodes, func(ctx context.Context, n bootstrap.Node) error {
+		return b.nodeStep(ctx, n, key, fmt.Sprintf("proxy local da API → %d control plane(s)", len(cps)), func() string { return bootstrap.APIProxyScript(cps) })
+	})
+}
+
 func (o *Ops) setClusterStatus(id, status string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -348,25 +369,31 @@ func (b *bootstrapRun) prepare(ctx context.Context, nodes []bootstrap.Node) erro
 	for _, n := range b.spec.ControlPlanes {
 		isCP[n.ID] = true
 	}
+	type prepStep struct {
+		key, name string
+		script    func() string
+	}
 	return b.parallel(ctx, nodes, func(ctx context.Context, n bootstrap.Node) error {
 		if err := b.connect(ctx, n); err != nil {
 			return err
 		}
-		steps := []struct {
-			key, name string
-			script    func() string
-		}{
+		steps := []prepStep{
 			{"swap", "desativar swap", bootstrap.SwapScript},
 			{"kernel", "módulos do kernel e sysctl", bootstrap.KernelScript},
 			{"containerd", "containerd (SystemdCgroup)", bootstrap.ContainerdScript},
-			{"k8s-repo", "repositório pkgs.k8s.io " + b.spec.Version.MinorString(), b.spec.RepoScript},
-			{"k8s-packages", "kubelet, kubeadm, kubectl " + b.spec.Version.String() + " (hold)", b.spec.PackagesScript},
 		}
+		if b.spec.LocalProxy() {
+			// Before kubeadm: init and join already reach the API through it.
+			cps := b.spec.ControlPlanes
+			steps = append(steps, prepStep{"apiproxy", fmt.Sprintf("proxy local da API (%d control plane(s))", len(cps)),
+				func() string { return bootstrap.APIProxyScript(cps) }})
+		}
+		steps = append(steps,
+			prepStep{"k8s-repo", "repositório pkgs.k8s.io " + b.spec.Version.MinorString(), b.spec.RepoScript},
+			prepStep{"k8s-packages", "kubelet, kubeadm, kubectl " + b.spec.Version.String() + " (hold)", b.spec.PackagesScript},
+		)
 		if isCP[n.ID] {
-			steps = append(steps, struct {
-				key, name string
-				script    func() string
-			}{"images", "imagens do control plane", b.spec.ImagesScript})
+			steps = append(steps, prepStep{"images", "imagens do control plane", b.spec.ImagesScript})
 		}
 		for _, st := range steps {
 			if err := b.nodeStep(ctx, n, st.key, st.name, st.script); err != nil {
@@ -412,7 +439,9 @@ func (b *bootstrapRun) storeKubeconfig(ctx context.Context, clusterID string, pr
 	}
 	old := cl.KubeconfigSecretID
 	cl.KubeconfigSecretID = &sid
-	cl.APIServerURL = "https://" + b.spec.Endpoint()
+	// k8sfront has no local proxy: it talks to the VIP or to the control
+	// planes directly (the kube client fails over between them).
+	cl.APIServerURL = "https://" + b.spec.ExternalEndpoints()[0]
 	cl.ControlPlaneEndpoint = b.spec.Endpoint()
 	if err := b.o.Store.UpdateCluster(ctx, cl); err != nil {
 		return "", err

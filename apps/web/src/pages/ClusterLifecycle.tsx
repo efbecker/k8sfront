@@ -22,9 +22,12 @@ import {
 } from "lucide-react";
 import {
   api,
+  endpointMode,
   isFinal,
   jobKindLabel,
   type CertsResult,
+  type Cluster,
+  type EndpointMode,
   type Job,
   type OSNodeReport,
   type RebootPolicy,
@@ -203,27 +206,51 @@ function UpgradeCard({ id, plan, jobs }: { id: string; plan: UpgradePlan; jobs?:
 
 // --- Nodes ---------------------------------------------------------------------
 
-function AddWorkerDialog({ id, open, onOpenChange, onJob }: { id: string; open: boolean; onOpenChange: (v: boolean) => void; onJob: (j: Job) => void }) {
+type AddRole = "control-plane" | "worker";
+
+function AddNodeDialog({
+  id,
+  role,
+  cpCount,
+  mode,
+  onOpenChange,
+  onJob,
+}: {
+  id: string;
+  role?: AddRole;
+  cpCount: number;
+  mode: EndpointMode;
+  onOpenChange: (v: boolean) => void;
+  onJob: (j: Job) => void;
+}) {
+  const open = !!role;
   const servers = useQuery({ queryKey: ["servers"], queryFn: api.servers, enabled: open });
   const free = (servers.data ?? []).filter((s) => !s.clusterId);
   const [sel, setSel] = useState("");
   const qc = useQueryClient();
   const add = useMutation({
-    mutationFn: () => api.addNode(id, sel),
+    mutationFn: () => api.addNode(id, sel, role ?? "worker"),
     onSuccess: (j) => {
       onJob(j);
       onOpenChange(false);
+      setSel("");
       qc.invalidateQueries();
     },
   });
   const chosen = free.find((s) => s.id === sel);
+  const cp = role === "control-plane";
+  const after = cpCount + 1;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Adicionar worker</DialogTitle>
+          <DialogTitle>{cp ? "Adicionar control plane" : "Adicionar worker"}</DialogTitle>
           <DialogDescription>
-            O servidor é preparado (swap, kernel, containerd, pacotes na versão do cluster), recebe credenciais de join de curta duração e entra como worker.
+            {cp
+              ? mode === "local-proxy"
+                ? "O servidor é preparado (inclusive o proxy local da API), o proxy de todos os nós passa a incluí-lo, recebe credenciais de join e certificados do control plane (curta duração) e entra como membro do etcd."
+                : "O servidor é preparado, recebe credenciais de join e certificados do control plane (curta duração), entra como membro do etcd e passa a disputar o VIP do kube-vip."
+              : "O servidor é preparado (swap, kernel, containerd, pacotes na versão do cluster), recebe credenciais de join de curta duração e entra como worker."}
           </DialogDescription>
         </DialogHeader>
         {free.length === 0 ? (
@@ -243,6 +270,13 @@ function AddWorkerDialog({ id, open, onOpenChange, onJob }: { id: string; open: 
         {chosen && chosen.lastCheckStatus !== "pass" && chosen.lastCheckStatus !== "warn" && (
           <p className="text-warning text-xs">Recomendado rodar a pré-checagem do servidor antes (Servidores → Testar).</p>
         )}
+        {cp && (
+          <p className={cn("text-xs", after % 2 === 0 ? "text-warning" : "text-muted-foreground")}>
+            {after % 2 === 0
+              ? `O cluster ficará com ${after} control planes. Com número par o etcd tolera as mesmas falhas que com ${after - 1}: adicione mais um em seguida para chegar a ${after + 1}.`
+              : `O cluster ficará com ${after} control planes e tolera a falha de ${(after - 1) / 2}.`}
+          </p>
+        )}
         <ErrorText error={add.error} />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -257,10 +291,30 @@ function AddWorkerDialog({ id, open, onOpenChange, onJob }: { id: string; open: 
   );
 }
 
-function NodesCard({ id, plan, members }: { id: string; plan: UpgradePlan; members: Server[] }) {
+function removeDescription(controlPlane: boolean, cpCount: number) {
+  if (!controlPlane) return <p>Drain → kubectl delete node → kubeadm reset no servidor. O servidor volta ao inventário como livre.</p>;
+  const left = cpCount - 1;
+  return (
+    <div className="space-y-2">
+      <p>
+        Drain → proxy local dos outros nós deixa de usá-lo → kubeadm reset (sai do etcd) → conferência do membro do etcd a partir de outro control plane →
+        kubectl delete node. O servidor volta ao inventário como livre.
+      </p>
+      <p className={left === 1 || left % 2 === 0 ? "text-warning" : undefined}>
+        Restam {left} control plane(s)
+        {left === 1 ? ", sem tolerância a falhas." : left % 2 === 0 ? `: com número par o etcd tolera as mesmas falhas que com ${left - 1}.` : "."}
+      </p>
+    </div>
+  );
+}
+
+function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePlan; members: Server[]; cluster?: Cluster }) {
   const qc = useQueryClient();
   const [job, setJob] = useState<Job>();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<AddRole>();
+  const mode = cluster ? endpointMode(cluster.options) : "direct";
+  const cpCount = members.filter((m) => m.role === "control-plane").length;
+  const canAddCP = cluster?.topology === "multi-node" && mode !== "direct";
   const refresh = () => qc.invalidateQueries({ queryKey: ["upgradePlan", id] });
   const cordon = useMutation({ mutationFn: (n: string) => api.cordon(id, n), onSuccess: refresh });
   const uncordon = useMutation({ mutationFn: (n: string) => api.uncordon(id, n), onSuccess: refresh });
@@ -275,9 +329,18 @@ function NodesCard({ id, plan, members }: { id: string; plan: UpgradePlan; membe
         <CardTitle className="flex items-center gap-2">
           <Waves className="text-primary size-4" /> Nós
         </CardTitle>
-        <CardDescription>Cordon/uncordon imediatos; drain usa a Eviction API (respeita PDBs, ignora DaemonSets). Adicionar e remover suportam workers.</CardDescription>
-        <CardAction>
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+        <CardDescription>
+          Cordon/uncordon imediatos; drain usa a Eviction API (respeita PDBs, ignora DaemonSets). Control planes: mantenha um número ímpar (3 ou 5) por causa do
+          quórum do etcd.
+          {mode === "direct" && " Este cluster usa o IP do primeiro control plane como endpoint, então não recebe novos control planes."}
+        </CardDescription>
+        <CardAction className="flex gap-2">
+          {canAddCP && (
+            <Button size="sm" variant="outline" onClick={() => setAdding("control-plane")}>
+              <Plus /> Adicionar control plane
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => setAdding("worker")}>
             <Plus /> Adicionar worker
           </Button>
         </CardAction>
@@ -337,12 +400,12 @@ function NodesCard({ id, plan, members }: { id: string; plan: UpgradePlan; membe
                       >
                         <Waves /> Drain
                       </ConfirmButton>
-                      {!n.controlPlane && srv && (
+                      {srv && (!n.controlPlane || cpCount > 1) && (
                         <ConfirmButton
                           variant="ghost"
                           destructive
-                          title={`Remover ${n.name} do cluster?`}
-                          description={<p>Drain → kubectl delete node → kubeadm reset no servidor. O servidor volta ao inventário como livre.</p>}
+                          title={`Remover ${n.controlPlane ? "o control plane " : ""}${n.name} do cluster?`}
+                          description={removeDescription(n.controlPlane, cpCount)}
                           confirmLabel="Remover"
                           onConfirm={() => remove.mutate(srv.id)}
                         >
@@ -361,7 +424,7 @@ function NodesCard({ id, plan, members }: { id: string; plan: UpgradePlan; membe
           {job && <JobLink job={job} />}
         </div>
       </CardContent>
-      <AddWorkerDialog id={id} open={adding} onOpenChange={setAdding} onJob={setJob} />
+      <AddNodeDialog id={id} role={adding} cpCount={cpCount} mode={mode} onOpenChange={(v) => !v && setAdding(undefined)} onJob={setJob} />
     </Card>
   );
 }
@@ -668,7 +731,7 @@ export function ClusterLifecyclePage() {
         plan.data && (
           <div className="space-y-6">
             <UpgradeCard id={id} plan={safePlan(plan.data)} jobs={jobs.data ?? []} />
-            <NodesCard id={id} plan={safePlan(plan.data)} members={members} />
+            <NodesCard id={id} plan={safePlan(plan.data)} members={members} cluster={cluster.data} />
             <div className="grid gap-6 2xl:grid-cols-2">
               <OSCard id={id} jobs={jobs.data} members={members} />
               <CertsCard id={id} jobs={jobs.data} />

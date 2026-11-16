@@ -95,8 +95,11 @@ func (s *Spec) ClusterConfig() string {
 	b.WriteString("controlPlaneEndpoint: " + q(s.Endpoint()) + "\n")
 	b.WriteString("networking:\n  podSubnet: " + q(s.PodCIDR) + "\n  serviceSubnet: " + q(s.ServiceCIDR) + "\n")
 	sans := []string{}
-	if kv := s.Options.KubeVIP; kv != nil && kv.Address != "" {
-		sans = append(sans, kv.Address)
+	switch s.Mode() {
+	case EndpointLocalProxy:
+		sans = append(sans, LocalProxyHost)
+	case EndpointKubeVIP:
+		sans = append(sans, s.Options.KubeVIP.Address)
 	}
 	for _, n := range s.ControlPlanes {
 		sans = append(sans, n.Host)

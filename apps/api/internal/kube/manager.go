@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,7 @@ type Cluster struct {
 	Mapper    meta.ResettableRESTMapper
 	Metadata  metadata.Interface
 	secretID  string
+	endpoints string // control planes dialed with failover (local-proxy clusters)
 	topoOnce  sync.Mutex
 	topo      *Topology
 	log       *slog.Logger
@@ -75,10 +77,14 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Cluster, error) {
 	if c.KubeconfigSecretID == nil {
 		return nil, ErrNoKubeconfig
 	}
+	endpoints, err := m.apiEndpoints(ctx, c)
+	if err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if cur, ok := m.clusters[clusterID]; ok {
-		if cur.secretID == *c.KubeconfigSecretID {
+		if cur.secretID == *c.KubeconfigSecretID && cur.endpoints == strings.Join(endpoints, ",") {
 			return cur, nil
 		}
 		cur.close()
@@ -95,6 +101,12 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kubeconfig inválido: %w", err)
 	}
+	if len(endpoints) > 0 {
+		// Local-proxy clusters: admin.conf names the per-node proxy, which
+		// only exists on the nodes. Connect to the control planes directly
+		// (TLS still verifies the endpoint name, a SAN of every API cert).
+		cfg.Dial = (&failoverDialer{addrs: endpoints}).DialContext
+	}
 	cs, err := newClientset(cfg)
 	if err != nil {
 		return nil, err
@@ -110,7 +122,7 @@ func (m *Manager) Get(ctx context.Context, clusterID string) (*Cluster, error) {
 	}
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(cs.Discovery()))
 	cl := &Cluster{ID: clusterID, Client: cs, Dynamic: dyn, Mapper: mapper, Metadata: md, secretID: *c.KubeconfigSecretID,
-		log: m.Log.With("cluster", clusterID)}
+		endpoints: strings.Join(endpoints, ","), log: m.Log.With("cluster", clusterID)}
 	m.clusters[clusterID] = cl
 	return cl, nil
 }

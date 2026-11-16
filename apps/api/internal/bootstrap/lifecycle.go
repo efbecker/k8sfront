@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"net"
 	"strings"
 
 	"github.com/efbecker/k8sfront/apps/api/internal/k8sver"
@@ -122,3 +123,10 @@ const (
 	ReadBootID   = "cat /proc/sys/kernel/random/boot_id"
 	ReadHostname = "hostname"
 )
+
+// EtcdMemberRemoveScript (run on a remaining control plane) removes the etcd
+// member of a control plane leaving the cluster, matched by name or peer URL.
+// Idempotent: kubeadm reset on the node usually removed it already.
+func EtcdMemberRemoveScript(node, host string) string {
+	return render("etcd-member-remove", map[string]string{"Node": node, "PeerURL": "https://" + net.JoinHostPort(host, "2380")})
+}

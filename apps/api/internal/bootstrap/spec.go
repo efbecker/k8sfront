@@ -32,13 +32,34 @@ const (
 	DefaultMetricsServer    = "v0.8.1"
 	DefaultKubeVIPVersion   = "v1.3.1"
 	APIServerPort           = 6443
-	CRISocket               = "unix:///run/containerd/containerd.sock"
+	// LocalProxyPort is where the per-node API proxy listens (127.0.0.1 only).
+	// 6443 is taken by kube-apiserver on control planes.
+	LocalProxyPort = 7445
+	// LocalProxyHost is the controlPlaneEndpoint name in local-proxy mode. Every
+	// node maps it to 127.0.0.1 in /etc/hosts; it is a SAN of the API cert.
+	LocalProxyHost = "k8s-api.k8sfront.internal"
+	CRISocket      = "unix:///run/containerd/containerd.sock"
 )
 
 // Topologies.
 const (
 	TopologySingle = "single-node"
 	TopologyMulti  = "multi-node"
+)
+
+// EndpointMode is how nodes reach a highly available kube-apiserver.
+type EndpointMode string
+
+const (
+	// EndpointLocalProxy (default): every node runs HAProxy on
+	// 127.0.0.1:LocalProxyPort with health checks to all control planes
+	// (like Talos KubePrism / RKE2). No VIP, no external load balancer.
+	EndpointLocalProxy EndpointMode = "local-proxy"
+	// EndpointKubeVIP: floating VIP announced by kube-vip (ARP).
+	EndpointKubeVIP EndpointMode = "kube-vip"
+	// EndpointDirect: the first control plane's address (single control
+	// plane only). Clusters created before endpoint modes existed use it.
+	EndpointDirect EndpointMode = "direct"
 )
 
 // KubeVIP configures a floating control-plane VIP (ARP mode, static pods).
@@ -49,11 +70,14 @@ type KubeVIP struct {
 
 // Options are the wizard choices stored as clusters.options.
 type Options struct {
-	UntaintControlPlane bool     `json:"untaintControlPlane"`
-	MetricsServer       bool     `json:"metricsServer"`
-	KubeVIP             *KubeVIP `json:"kubeVip,omitempty"`
-	CNIVersion          string   `json:"cniVersion,omitempty"`
-	ExtraSANs           []string `json:"extraSans,omitempty"`
+	UntaintControlPlane bool `json:"untaintControlPlane"`
+	MetricsServer       bool `json:"metricsServer"`
+	// EndpointMode is empty on clusters created before it existed: kube-vip
+	// when KubeVIP is set, direct otherwise. New clusters default to local-proxy.
+	EndpointMode EndpointMode `json:"endpointMode,omitempty"`
+	KubeVIP      *KubeVIP     `json:"kubeVip,omitempty"`
+	CNIVersion   string       `json:"cniVersion,omitempty"`
+	ExtraSANs    []string     `json:"extraSans,omitempty"`
 }
 
 // ParseOptions decodes stored options.
@@ -86,16 +110,52 @@ type Spec struct {
 	Workers       []Node
 }
 
-// Endpoint returns the controlPlaneEndpoint host:port (VIP when kube-vip is
-// enabled, otherwise the first control plane).
+// Mode returns the effective endpoint mode.
+func (o Options) Mode() EndpointMode {
+	if o.EndpointMode != "" {
+		return o.EndpointMode
+	}
+	if o.KubeVIP != nil && o.KubeVIP.Address != "" {
+		return EndpointKubeVIP
+	}
+	return EndpointDirect
+}
+
+// Mode returns the effective endpoint mode of the cluster.
+func (s *Spec) Mode() EndpointMode { return s.Options.Mode() }
+
+// LocalProxy reports whether nodes reach the API through the local proxy.
+func (s *Spec) LocalProxy() bool { return s.Mode() == EndpointLocalProxy }
+
+// Endpoint returns the controlPlaneEndpoint host:port: the local proxy name,
+// the kube-vip VIP or the first control plane.
 func (s *Spec) Endpoint() string {
+	switch s.Mode() {
+	case EndpointLocalProxy:
+		return net.JoinHostPort(LocalProxyHost, strconv.Itoa(LocalProxyPort))
+	case EndpointKubeVIP:
+		if s.Options.KubeVIP != nil {
+			return net.JoinHostPort(s.Options.KubeVIP.Address, strconv.Itoa(APIServerPort))
+		}
+	}
 	host := ""
-	if s.Options.KubeVIP != nil && s.Options.KubeVIP.Address != "" {
-		host = s.Options.KubeVIP.Address
-	} else if len(s.ControlPlanes) > 0 {
+	if len(s.ControlPlanes) > 0 {
 		host = s.ControlPlanes[0].Host
 	}
 	return net.JoinHostPort(host, strconv.Itoa(APIServerPort))
+}
+
+// ExternalEndpoints are the addresses k8sfront and an external kubectl use to
+// reach the API (they have no local proxy): the VIP, or every control plane.
+func (s *Spec) ExternalEndpoints() []string {
+	if s.Mode() == EndpointKubeVIP {
+		return []string{s.Endpoint()}
+	}
+	out := make([]string, 0, len(s.ControlPlanes))
+	for _, n := range s.ControlPlanes {
+		out = append(out, net.JoinHostPort(n.Host, strconv.Itoa(APIServerPort)))
+	}
+	return out
 }
 
 // CNIVersion returns the effective CNI version.
@@ -167,11 +227,21 @@ func (s *Spec) Validate() error {
 	default:
 		return invalid("topology must be %s or %s", TopologySingle, TopologyMulti)
 	}
-	if len(s.ControlPlanes) > 1 && (s.Options.KubeVIP == nil || s.Options.KubeVIP.Address == "") {
-		return invalid("more than one control plane requires a VIP (kube-vip) as the control plane endpoint")
-	}
-	if len(s.ControlPlanes) > 1 && len(s.ControlPlanes)%2 == 0 {
-		return invalid("use an odd number of control planes (etcd quorum): %d given", len(s.ControlPlanes))
+	switch s.Mode() {
+	case EndpointLocalProxy:
+		if s.Options.KubeVIP != nil && s.Options.KubeVIP.Address != "" {
+			return invalid("the local API proxy and kube-vip are mutually exclusive")
+		}
+	case EndpointKubeVIP:
+		if s.Options.KubeVIP == nil || s.Options.KubeVIP.Address == "" {
+			return invalid("kube-vip mode requires the VIP address")
+		}
+	case EndpointDirect:
+		if len(s.ControlPlanes) > 1 {
+			return invalid("more than one control plane requires the local API proxy or a VIP (kube-vip) as the control plane endpoint")
+		}
+	default:
+		return invalid("endpoint mode must be %s, %s or %s", EndpointLocalProxy, EndpointKubeVIP, EndpointDirect)
 	}
 	seen := map[string]bool{}
 	for _, n := range append(append([]Node{}, s.ControlPlanes...), s.Workers...) {
@@ -204,6 +274,19 @@ func (s *Spec) Validate() error {
 		if _, err := netip.ParseAddr(san); err != nil && !nameRe.MatchString(strings.ReplaceAll(san, ".", "")) {
 			return invalid("invalid certificate SAN %q", san)
 		}
+	}
+	return nil
+}
+
+// ValidateNew adds the checks that only apply when a cluster is created:
+// an odd number of control planes (etcd quorum). Lifecycle jobs accept even
+// counts, which happen while control planes are added or removed one by one.
+func (s *Spec) ValidateNew() error {
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if len(s.ControlPlanes) > 1 && len(s.ControlPlanes)%2 == 0 {
+		return invalid("use an odd number of control planes (etcd quorum): %d given", len(s.ControlPlanes))
 	}
 	return nil
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, ChevronRight, Loader2, Network, Pencil, Plus, Rocket, Server as ServerIcon, Stethoscope, Trash2 } from "lucide-react";
-import { api, isFinal, type CNI, type ClusterInput, type Server, type Topology } from "@/lib/api";
+import { api, isFinal, LOCAL_PROXY_ENDPOINT, type CNI, type ClusterInput, type Server, type Topology } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useJobStream } from "@/hooks/useJobStream";
 import { PageHeader } from "@/components/layout/AppShell";
@@ -66,7 +66,8 @@ export function ClusterWizardPage() {
   const [topology, setTopology] = useState<Topology>("multi-node");
   const [untaint, setUntaint] = useState(false);
   const [metrics, setMetrics] = useState(true);
-  const [vipOn, setVipOn] = useState(false);
+  const [mode, setMode] = useState<"local-proxy" | "kube-vip">("local-proxy");
+  const vipOn = topology === "multi-node" && mode === "kube-vip";
   const [vip, setVip] = useState("");
   const [vipIface, setVipIface] = useState("");
   const [roles, setRoles] = useState<Record<string, Role | "">>({});
@@ -122,8 +123,8 @@ export function ClusterWizardPage() {
   const errors2: string[] = [];
   if (cps.length === 0) errors2.push("Selecione ao menos um Control Plane.");
   if (topology === "single-node" && (cps.length !== 1 || workers.length > 0)) errors2.push("Single-node usa exatamente um servidor como Control Plane.");
-  if (cps.length > 1 && cps.length % 2 === 0) errors2.push("Use um número ímpar de Control Planes (quórum do etcd).");
-  if (cps.length > 1 && !vipOn) errors2.push("Mais de um Control Plane exige VIP (kube-vip). Volte ao passo 1 para ativar.");
+  if (cps.length > 1 && cps.length % 2 === 0)
+    errors2.push(`Use um número ímpar de Control Planes (quórum do etcd): com ${cps.length} o cluster tolera as mesmas falhas que com ${cps.length - 1}.`);
   const untested = selected.filter((s) => !s.lastCheckStatus);
   const failing = selected.filter((s) => s.lastCheckStatus === "fail");
   if (untested.length) errors2.push(`Teste os pré-requisitos de: ${untested.map((s) => s.name).join(", ")}.`);
@@ -141,6 +142,7 @@ export function ClusterWizardPage() {
         options: {
           untaintControlPlane: topology === "single-node" || untaint,
           metricsServer: metrics,
+          endpointMode: vipOn ? "kube-vip" : "local-proxy",
           kubeVip: vipOn ? { address: vip, interface: vipIface || undefined } : undefined,
         },
         nodes: [...cps, ...workers].map((s) => ({ serverId: s.id, role: roles[s.id] as Role })),
@@ -164,7 +166,10 @@ export function ClusterWizardPage() {
       ["Topologia", topology === "single-node" ? "Single-node" : "Multi-node"],
       ["Pod CIDR", podCidr],
       ["Service CIDR", serviceCidr],
-      ["Endpoint", vipOn ? `${vip}:6443 (kube-vip${vipIface ? ` em ${vipIface}` : ""})` : `${cps[0]?.host ?? "—"}:6443`],
+      [
+        "Endpoint da API",
+        vipOn ? `${vip}:6443 (kube-vip${vipIface ? ` em ${vipIface}` : ""})` : `${LOCAL_PROXY_ENDPOINT} (proxy local em cada nó → ${cps.length} control plane(s))`,
+      ],
       ["Workloads no Control Plane", topology === "single-node" || untaint ? "permitidos" : "não"],
       ["metrics-server", metrics ? "sim" : "não"],
     ],
@@ -254,17 +259,32 @@ export function ClusterWizardPage() {
                   active={topology === "single-node"}
                   onClick={() => {
                     setTopology("single-node");
-                    setVipOn(false);
                     setRoles({});
                   }}
                   title="Single-node"
                   desc="Um servidor como Control Plane; o taint é removido para rodar workloads."
                 />
-                <Choice active={topology === "multi-node"} onClick={() => setTopology("multi-node")} title="Multi-node" desc="1 ou mais Control Planes (HA com kube-vip) e Workers." />
+                <Choice active={topology === "multi-node"} onClick={() => setTopology("multi-node")} title="Multi-node" desc="1, 3 ou 5 Control Planes (HA) e Workers." />
               </div>
               {topology === "multi-node" && (
                 <>
-                  <Toggle checked={vipOn} onChange={setVipOn} label="VIP do Control Plane com kube-vip" hint="Obrigatório para mais de um Control Plane. Modo ARP, mesmo segmento L2 dos nós." />
+                  <div className="space-y-1.5">
+                    <Label>Alta disponibilidade da API</Label>
+                    <div className="flex gap-3">
+                      <Choice
+                        active={mode === "local-proxy"}
+                        onClick={() => setMode("local-proxy")}
+                        title="Proxy local (recomendado)"
+                        desc="HAProxy em 127.0.0.1:7445 em cada nó, com health check em todos os Control Planes. Sem VIP nem balanceador externo."
+                      />
+                      <Choice
+                        active={mode === "kube-vip"}
+                        onClick={() => setMode("kube-vip")}
+                        title="VIP com kube-vip"
+                        desc="IP flutuante anunciado por ARP. Exige um IP livre no mesmo segmento L2 dos Control Planes."
+                      />
+                    </div>
+                  </div>
                   {vipOn && (
                     <div className="grid grid-cols-2 gap-4 pl-7">
                       <div className="space-y-1.5">
@@ -387,7 +407,11 @@ export function ClusterWizardPage() {
             </CardHeader>
             <CardContent>
               <ol className="list-decimal space-y-1.5 pl-5 text-sm">
-                <li>Em paralelo em {selected.length} servidor(es): validar Debian 13+ e sudo, desativar swap, módulos/sysctl, containerd (SystemdCgroup), repositório pkgs.k8s.io, kubelet/kubeadm/kubectl {version} em hold.</li>
+                <li>
+                  Em paralelo em {selected.length} servidor(es): validar Debian 13+ e sudo, desativar swap, módulos/sysctl, containerd (SystemdCgroup)
+                  {vipOn ? "" : ", proxy local da API (HAProxy em 127.0.0.1:7445 apontando para os Control Planes)"}, repositório pkgs.k8s.io,
+                  kubelet/kubeadm/kubectl {version} em hold.
+                </li>
                 <li>
                   <code>kubeadm init</code> em {cps[0]?.name}
                   {vipOn ? " com kube-vip" : ""}; admin.conf cifrado no backend.
@@ -410,6 +434,12 @@ export function ClusterWizardPage() {
             <li key={e}>{e}</li>
           ))}
         </ul>
+      )}
+      {step === 1 && topology === "multi-node" && cps.length === 1 && (
+        <p className="text-muted-foreground mt-4 text-sm">
+          Com 1 Control Plane não há alta disponibilidade. Para HA use 3 (tolera 1 falha) ou 5 (tolera 2); dá para adicionar depois em Updates &amp; Lifecycle
+          {vipOn ? "" : " sem recriar o cluster, graças ao proxy local"}.
+        </p>
       )}
       {create.error && <p className="text-destructive mt-4 text-sm">{create.error.message}</p>}
       <div className="mt-6 flex justify-between">

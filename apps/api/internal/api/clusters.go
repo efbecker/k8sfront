@@ -118,6 +118,14 @@ func (s *Server) createCluster(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
 		return
 	}
+	if in.Options.EndpointMode == "" {
+		// New clusters reach the API through the local proxy on every node
+		// unless a VIP was given.
+		in.Options.EndpointMode = bootstrap.EndpointLocalProxy
+		if in.Options.KubeVIP != nil && in.Options.KubeVIP.Address != "" {
+			in.Options.EndpointMode = bootstrap.EndpointKubeVIP
+		}
+	}
 	opts, _ := json.Marshal(in.Options)
 	c := &store.Cluster{ID: uuid.NewString(), Name: strings.TrimSpace(in.Name), KubernetesVersion: in.KubernetesVersion,
 		PodCIDR: in.PodCIDR, ServiceCIDR: in.ServiceCIDR, CNI: in.CNI, Topology: in.Topology, Options: opts, Status: store.ClusterDraft}
@@ -152,7 +160,11 @@ func (s *Server) createCluster(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if _, err := ops.SpecFor(c, ordered); err != nil {
+	spec, err := ops.SpecFor(c, ordered)
+	if err == nil {
+		err = spec.ValidateNew()
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "validation", strings.TrimPrefix(err.Error(), bootstrap.ErrInvalidSpec.Error()+": "))
 		return
 	}
@@ -271,8 +283,22 @@ func (s *Server) downloadKubeconfig(w http.ResponseWriter, r *http.Request) {
 			kc[i] = 0
 		}
 	}()
+	out := kc
+	if s.Kube != nil {
+		ext, err := s.Kube.ExternalKubeconfig(r.Context(), c, kc)
+		if err != nil {
+			s.storeError(w, err)
+			return
+		}
+		defer func() {
+			for i := range ext {
+				ext[i] = 0
+			}
+		}()
+		out = ext
+	}
 	s.audit(r, "cluster.kubeconfig_download", "cluster", c.ID, nil)
 	w.Header().Set("Content-Type", "application/yaml")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-admin.conf"`, c.Name))
-	_, _ = w.Write(kc)
+	_, _ = w.Write(out)
 }

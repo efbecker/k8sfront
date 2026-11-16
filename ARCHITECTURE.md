@@ -98,7 +98,7 @@ Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e 
 | Tabela | Finalidade | Colunas principais |
 | --- | --- | --- |
 | `secrets` | blobs cifrados | `id`, `kind` (ssh_private_key, ssh_key_passphrase, ssh_password, sudo_password, kubeconfig), `ciphertext`, `key_id` |
-| `clusters` | clusters gerenciados (Fase 2+) | `name`, `kubernetes_version`, `pod_cidr`, `service_cidr`, `cni`, `topology`, `control_plane_endpoint`, `status` (draft/provisioning/ready/failed), `kubeconfig_secret_id`, `options` (JSON: kube-vip, untaint, metrics-server, versão do CNI), `api_server_url` |
+| `clusters` | clusters gerenciados (Fase 2+) | `name`, `kubernetes_version`, `pod_cidr`, `service_cidr`, `cni`, `topology`, `control_plane_endpoint`, `status` (draft/provisioning/ready/failed), `kubeconfig_secret_id`, `options` (JSON: `endpointMode` local-proxy/kube-vip/direct, kube-vip, untaint, metrics-server, versão do CNI), `api_server_url` |
 | `servers` | inventário Debian 13+ | `host`, `port`, `ssh_user`, `auth_method`, `role`, `credential_secret_id`, `passphrase_secret_id`, `sudo_secret_id`, `sudo_mode`, `os_*`, `kernel`, `last_check_*`; `UNIQUE(host, port)` |
 | `known_hosts` | host keys SSH (TOFU) | `host_port` (PK), `key_type`, `public_key`, `fingerprint`, `first_seen`, `last_seen` |
 | `jobs` | operações em background | `kind`, `status`, `target_type`, `target_id`, `params` (JSON), `result` (JSON), `error`, `attempts`, `created_at/started_at/finished_at` |
@@ -303,7 +303,7 @@ sha256 verificado), e não via SDK Go, para não trazer a árvore de dependênci
 | --- | --- | --- |
 | GET | `/clusters/{id}/upgrades/plan` | versão da API, nós, pré-checagens (Ready, skew, PDBs, upgrade pendente) e destinos com a cadeia de minors |
 | POST | `/clusters/{id}/upgrades` | `{targetVersion}` (precisa estar no plano) → job `cluster.upgrade` |
-| POST · DELETE | `/clusters/{id}/nodes` · `/clusters/{id}/nodes/{serverId}` | adicionar / remover **worker** (`cluster.node-add` / `cluster.node-remove`) |
+| POST · DELETE | `/clusters/{id}/nodes` · `/clusters/{id}/nodes/{serverId}` | adicionar (`{serverId, role}`) / remover worker ou control plane (`cluster.node-add` / `cluster.node-remove`) |
 | POST | `/clusters/{id}/k8s/nodes/{name}/cordon` · `uncordon` · `drain` | cordon/uncordon imediatos (client-go); drain é job (`cluster.node-drain`) |
 | POST | `/clusters/{id}/os-updates/check` · `/clusters/{id}/os-updates` | `cluster.os-check` (paralelo) · `cluster.os-update` `{serverIds, reboot: never\|if-required\|always}` |
 | POST | `/clusters/{id}/rolling-reboot` | `cluster.rolling-reboot` `{serverIds}` |
@@ -313,18 +313,19 @@ Jobs de manutenção que alteram o cluster (upgrade, nós, SO, reboot, renovaç�
 
 ### Endpoints previstos
 - _(Fase 3)_ configmaps, secrets mascarados, WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).
-- _(Fase 5)_ adicionar/remover control planes (hoje só workers).
 
 ---
 
 ## 8. Bootstrap (Fase 2, `cluster.bootstrap`)
 
 `bootstrap.Spec.Validate` recusa: nome fora de DNS label, minor < 1.31, CIDRs sobrepostos/pequenos, IPs de nós ou VIP
-dentro dos CIDRs, HA sem VIP, número par de control planes, servidores duplicados. Pipeline (`internal/ops/bootstrap.go`):
+dentro dos CIDRs, mais de um CP no modo `direct`, kube-vip junto com o proxy local, servidores duplicados;
+`ValidateNew` (só na criação) recusa também número par de control planes. Pipeline (`internal/ops/bootstrap.go`):
 
 1. **Preparação em paralelo** por nó (`connect` refaz a validação Debian 13+ a cada execução; demais etapas `StepOnce`):
    `swap` (swapoff, `/etc/fstab`, `systemctl mask` das unidades `.swap`) → `kernel` (overlay, br_netfilter,
-   sysctl) → `containerd` (`SystemdCgroup = true`, pause image alinhada ao kubeadm) → `k8s-repo` (keyring em
+   sysctl) → `containerd` (`SystemdCgroup = true`, pause image alinhada ao kubeadm) → `apiproxy` (só no modo
+   proxy local, ver abaixo) → `k8s-repo` (keyring em
    `/etc/apt/keyrings`, `signed-by=`) → `k8s-packages` (versão exata + `apt-mark hold`) → `images` (só CPs).
 2. `init` no primeiro control plane (kube-vip em modo ARP como static pod, usando `super-admin.conf` no init e
    `admin.conf` depois em `kube-vip-finalize`).
@@ -339,6 +340,27 @@ Segredos (bootstrap token, certificate-key) são gerados no Go, registrados no `
 ao kubeadm por process substitution (`--config <(cat <<'EOF' ...)`) dentro do script enviado via stdin: nunca em
 argv, nunca em disco. Versões fixadas em `internal/bootstrap/spec.go` (Cilium 1.20.4 / cilium-cli v0.20.2,
 Calico v3.32.3, metrics-server v0.8.1, kube-vip v1.3.1). Retomar um bootstrap pula as etapas `StepOnce` já concluídas.
+
+### Endpoint da API e alta disponibilidade
+
+`Options.EndpointMode` define o `controlPlaneEndpoint`:
+
+| Modo | Endpoint | Como funciona |
+| --- | --- | --- |
+| `local-proxy` (padrão de clusters novos) | `k8s-api.k8sfront.internal:7445` | Cada nó (CPs e workers) roda o HAProxy do Debian como `k8sfront-apiproxy.service` em `127.0.0.1:7445`, com health check HTTPS `/readyz` em todos os kube-apiservers (`:6443`) e `on-marked-down shutdown-sessions`. O nome aponta para 127.0.0.1 em `/etc/hosts` e é SAN do certificado da API. É serviço do host, não static pod, porque o `kubeadm join` precisa do endpoint antes de existir kubelet no nó. |
+| `kube-vip` | `VIP:6443` | VIP flutuante em ARP (static pod nos CPs). |
+| `direct` | `IP do 1º CP:6443` | Clusters antigos (options sem `endpointMode` e sem VIP); só 1 CP. |
+
+O k8sfront e o kubectl externo não têm proxy local: no modo `local-proxy` o `kube.Manager` disca os CPs com
+failover (`failoverDialer`, verificando TLS pelo nome do endpoint) e o download do kubeconfig troca o `server` pelo
+primeiro CP (com `tls-server-name`) e lista os demais no cabeçalho.
+
+Adicionar control plane (`cluster.node-add` com `role=control-plane`): preparação do nó (inclui o proxy com a lista
+nova) → `apiproxy-add` em todos os outros nós → `join-credentials` (com upload-certs) → `kubeadm join --control-plane`
+→ `Ready`. Remover (`cluster.node-remove`): drain → `apiproxy-remove` nos outros nós → `kubeadm reset` no nó (sai do
+etcd e remove o proxy) → `etcd-member` (confere/remove o membro via etcdctl em outro CP) → `kubectl delete node`.
+O primário do job nunca é o nó alvo. Contagens pares geram aviso (o etcd tolera as mesmas falhas que com um a menos);
+o único CP não pode ser removido.
 
 As configs geradas são validadas contra o kubeadm real quando `K8SFRONT_KUBEADM=/caminho/kubeadm` está definido
 em `go test ./internal/bootstrap/`.

@@ -137,9 +137,20 @@ export interface K8sRelease {
   latest: boolean;
 }
 
+/** How nodes reach the API: HAProxy on 127.0.0.1 in every node (default), kube-vip VIP, or the first CP (legacy). */
+export type EndpointMode = "local-proxy" | "kube-vip" | "direct";
+
+/** controlPlaneEndpoint name in local-proxy mode (resolves to 127.0.0.1 on every node). */
+export const LOCAL_PROXY_ENDPOINT = "k8s-api.k8sfront.internal:7445";
+
+export function endpointMode(o: ClusterOptions): EndpointMode {
+  return o.endpointMode ?? (o.kubeVip?.address ? "kube-vip" : "direct");
+}
+
 export interface ClusterOptions {
   untaintControlPlane: boolean;
   metricsServer: boolean;
+  endpointMode?: EndpointMode;
   kubeVip?: { address: string; interface?: string };
   cniVersion?: string;
   extraSans?: string[];
@@ -571,7 +582,8 @@ export const api = {
 
   upgradePlan: (id: string) => request<UpgradePlan>("GET", `/clusters/${id}/upgrades/plan`),
   startUpgrade: (id: string, targetVersion: string) => request<Job>("POST", `/clusters/${id}/upgrades`, { targetVersion }),
-  addNode: (id: string, serverId: string) => request<Job>("POST", `/clusters/${id}/nodes`, { serverId }),
+  addNode: (id: string, serverId: string, role: "control-plane" | "worker" = "worker") =>
+    request<Job>("POST", `/clusters/${id}/nodes`, { serverId, role }),
   removeNode: (id: string, serverId: string) => request<Job>("DELETE", `/clusters/${id}/nodes/${serverId}`),
   cordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/cordon`),
   uncordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/uncordon`),

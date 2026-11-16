@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/efbecker/k8sfront/apps/api/internal/bootstrap"
 	"github.com/efbecker/k8sfront/apps/api/internal/sshx"
 	"github.com/efbecker/k8sfront/apps/api/internal/store"
 )
@@ -92,13 +93,13 @@ func RequirementsFor(role store.NodeRole) Requirements {
 	switch role {
 	case store.RoleControlPlane:
 		return Requirements{MinCPUs: 2, MinMemBytes: 1700 * mib, MinDiskBytes: 10 * gib, WarnDisk: 20 * gib,
-			Ports: []int{6443, 2379, 2380, 10250, 10257, 10259}}
+			Ports: []int{6443, 2379, 2380, bootstrap.LocalProxyPort, 10250, 10257, 10259}}
 	case store.RoleWorker:
 		return Requirements{MinCPUs: 1, MinMemBytes: 1 * gib, MinDiskBytes: 10 * gib, WarnDisk: 20 * gib,
-			Ports: []int{10250, 10256}}
+			Ports: []int{bootstrap.LocalProxyPort, 10250, 10256}}
 	default:
 		return Requirements{MinCPUs: 1, MinMemBytes: 1 * gib, MinDiskBytes: 10 * gib, WarnDisk: 20 * gib,
-			Ports: []int{6443, 2379, 2380, 10250, 10256, 10257, 10259}}
+			Ports: []int{6443, 2379, 2380, bootstrap.LocalProxyPort, 10250, 10256, 10257, 10259}}
 	}
 }
 

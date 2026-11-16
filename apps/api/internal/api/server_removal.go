@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/efbecker/k8sfront/apps/api/internal/kube"
@@ -32,8 +33,18 @@ func (s *Server) planServerRemoval(ctx context.Context, srv *store.Server) (*ser
 		return nil, nil, err
 	}
 	out.ClusterID, out.ClusterName = c.ID, c.Name
-	if srv.Role != store.RoleWorker {
-		out.Blocked = "este servidor é control plane do cluster " + c.Name + ". Remover control planes não é suportado: tirar um membro do etcd pode derrubar o quórum e, se for o único, o cluster inteiro. Remova os workers ou exclua o cluster."
+	if srv.Role == store.RoleControlPlane {
+		left, err := s.controlPlanesLeft(ctx, c.ID, srv.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if left == 0 {
+			out.Blocked = "este servidor é o único control plane do cluster " + c.Name + "; removê-lo derruba o cluster inteiro. Exclua o cluster ou adicione outro control plane antes."
+			return out, c, nil
+		}
+		out.Warnings = append(out.Warnings, controlPlaneRemovalWarning(left))
+	} else if srv.Role != store.RoleWorker {
+		out.Blocked = "o servidor não tem papel no cluster " + c.Name + "."
 		return out, c, nil
 	}
 	if c.KubeconfigSecretID == nil {
@@ -124,4 +135,30 @@ func (s *Server) removeServer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.submitMaintenance(w, r, c, ops.KindNodeRemove, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID, DeleteServer: true},
 		map[string]any{"server": srv.Name, "deleteServer": true})
+}
+
+// controlPlanesLeft counts the control planes that remain once serverID leaves.
+func (s *Server) controlPlanesLeft(ctx context.Context, clusterID, serverID string) (int, error) {
+	members, err := s.Store.ListClusterServers(ctx, clusterID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, m := range members {
+		if m.Role == store.RoleControlPlane && m.ID != serverID {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func controlPlaneRemovalWarning(left int) string {
+	msg := fmt.Sprintf("é um control plane: o membro dele sai do etcd e o proxy local dos outros nós deixa de usá-lo. Restam %d control plane(s)", left)
+	switch {
+	case left == 1:
+		return msg + ", sem tolerância a falhas."
+	case left%2 == 0:
+		return msg + ": com número par o etcd tolera as mesmas falhas que com um a menos; prefira manter um número ímpar."
+	}
+	return msg + "."
 }

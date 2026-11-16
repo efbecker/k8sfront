@@ -38,7 +38,6 @@ func TestValidate(t *testing.T) {
 	cases := map[string]func(s *Spec){
 		"overlap":         func(s *Spec) { s.ServiceCIDR = "10.244.128.0/20" },
 		"no vip for HA":   func(s *Spec) { s.Options.KubeVIP = nil },
-		"even CPs":        func(s *Spec) { s.ControlPlanes = s.ControlPlanes[:2] },
 		"old k8s":         func(s *Spec) { s.Version.Minor = 28 },
 		"bad name":        func(s *Spec) { s.ClusterName = "Prod_1" },
 		"node in podcidr": func(s *Spec) { s.Workers[0].Host = "10.244.1.5" },
@@ -50,6 +49,12 @@ func TestValidate(t *testing.T) {
 		},
 		"duplicate node": func(s *Spec) { s.Workers[0] = s.ControlPlanes[1] },
 		"bad iface":      func(s *Spec) { s.Options.KubeVIP.Interface = "eth0; reboot" },
+		"proxy and vip":  func(s *Spec) { s.Options.EndpointMode = EndpointLocalProxy },
+		"vip mode no vip": func(s *Spec) {
+			s.Options.EndpointMode = EndpointKubeVIP
+			s.Options.KubeVIP = nil
+		},
+		"bad mode": func(s *Spec) { s.Options.EndpointMode = "dns" },
 	}
 	for name, mutate := range cases {
 		s := haSpec()
@@ -57,6 +62,86 @@ func TestValidate(t *testing.T) {
 		if err := s.Validate(); !errors.Is(err, ErrInvalidSpec) {
 			t.Errorf("%s: expected ErrInvalidSpec, got %v", name, err)
 		}
+	}
+}
+
+func proxySpec() *Spec {
+	s := haSpec()
+	s.Options.KubeVIP = nil
+	s.Options.EndpointMode = EndpointLocalProxy
+	return s
+}
+
+func TestValidateNewRequiresOddControlPlanes(t *testing.T) {
+	s := proxySpec()
+	s.ControlPlanes = s.ControlPlanes[:2]
+	// Lifecycle jobs see even counts while control planes are added one by one.
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidateNew(); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("new cluster with 2 control planes: %v", err)
+	}
+	if err := proxySpec().ValidateNew(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEndpointModes(t *testing.T) {
+	legacy := haSpec()
+	legacy.Options.KubeVIP = nil
+	legacy.ControlPlanes = legacy.ControlPlanes[:1]
+	if legacy.Mode() != EndpointDirect || legacy.Endpoint() != "192.168.10.11:6443" {
+		t.Fatalf("legacy clusters keep the first control plane: %s %s", legacy.Mode(), legacy.Endpoint())
+	}
+	legacy.ControlPlanes = haSpec().ControlPlanes
+	if err := legacy.Validate(); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatal("direct mode must refuse more than one control plane")
+	}
+	if v := haSpec(); v.Mode() != EndpointKubeVIP || v.Endpoint() != "192.168.10.50:6443" || len(v.ExternalEndpoints()) != 1 {
+		t.Fatalf("kube-vip endpoint: %s %v", v.Endpoint(), v.ExternalEndpoints())
+	}
+	p := proxySpec()
+	if p.Endpoint() != "k8s-api.k8sfront.internal:7445" {
+		t.Fatalf("local proxy endpoint: %s", p.Endpoint())
+	}
+	if got := p.ExternalEndpoints(); len(got) != 3 || got[2] != "192.168.10.13:6443" {
+		t.Fatalf("external endpoints: %v", got)
+	}
+	cc := p.ClusterConfig()
+	if !strings.Contains(cc, `controlPlaneEndpoint: "k8s-api.k8sfront.internal:7445"`) || !strings.Contains(cc, `- "k8s-api.k8sfront.internal"`) {
+		t.Fatalf("cluster config must use and sign the proxy name:\n%s", cc)
+	}
+	sec, _ := NewJoinSecrets()
+	if j := p.JoinConfig(p.Workers[0], false, sec, "sha256:abc"); !strings.Contains(j, `apiServerEndpoint: "k8s-api.k8sfront.internal:7445"`) {
+		t.Fatalf("joins go through the local proxy:\n%s", j)
+	}
+	if strings.Contains(p.InitScript(sec), "kube-vip") || strings.Contains(p.JoinScript(p.ControlPlanes[1], true, sec, "sha256:abc"), "kube-vip") {
+		t.Fatal("no kube-vip in local proxy mode")
+	}
+}
+
+func TestAPIProxyConfig(t *testing.T) {
+	cfg := APIProxyConfig(proxySpec().ControlPlanes)
+	for _, want := range []string{"bind 127.0.0.1:7445", "uri /readyz", "check-ssl", "on-marked-down shutdown-sessions",
+		"server cp1 192.168.10.11:6443", "server cp3 192.168.10.13:6443"} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("config lacks %q:\n%s", want, cfg)
+		}
+	}
+	if strings.Contains(cfg, "0.0.0.0") || strings.Contains(cfg, "*:7445") {
+		t.Error("the proxy must listen on loopback only")
+	}
+	if bin, err := exec.LookPath("haproxy"); err == nil {
+		p := filepath.Join(t.TempDir(), "apiproxy.cfg")
+		os.WriteFile(p, []byte(cfg), 0o600)
+		if out, err := exec.Command(bin, "-c", "-f", p).CombinedOutput(); err != nil {
+			t.Errorf("haproxy rejected the config: %v\n%s", err, out)
+		}
+	}
+	script := APIProxyScript(proxySpec().ControlPlanes)
+	if !strings.Contains(script, "k8s-api.k8sfront.internal") || !strings.Contains(script, "Before=kubelet.service") || strings.Contains(script, "apt-key") {
+		t.Error("proxy script must map the name in /etc/hosts and start before the kubelet")
 	}
 }
 
@@ -89,6 +174,8 @@ func TestScriptsAreValidBash(t *testing.T) {
 		"wait-node": WaitNodeScript("w1", "v1.37.2"), "wait-kubelet": WaitKubeletScript(), "reboot": RebootScript(),
 		"os-check": OSCheckScript(), "os-upgrade": OSUpgradeScript(), "certs-check": CertsCheckScript(), "certs-renew": CertsRenewScript(),
 		"delete-node": DeleteNodeScript("w1"), "reset-node": ResetNodeScript(),
+		"apiproxy": APIProxyScript(s.ControlPlanes), "etcd-member-remove": EtcdMemberRemoveScript("cp3", "192.168.10.13"),
+		"init-proxy": proxySpec().InitScript(sec), "join-proxy": proxySpec().JoinScript(s.ControlPlanes[1], true, sec, "sha256:abc"),
 		"helm-install":   HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "nginx", Repo: "https://charts.example.com", Version: "1.2.3", Values: "replicaCount: 2\n"}),
 		"helm-oci":       HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "oci://registry.example.com/charts/web"}),
 		"helm-uninstall": HelmScript(HelmRequest{Action: HelmUninstall, Release: "web", Namespace: "apps"}),
@@ -153,10 +240,12 @@ func TestConfigsValidateWithKubeadm(t *testing.T) {
 		t.Skip("set K8SFRONT_KUBEADM=/path/to/kubeadm to validate configs")
 	}
 	s := haSpec()
+	p := proxySpec()
 	sec, _ := NewJoinSecrets()
 	dir := t.TempDir()
 	docs := map[string]string{
 		"init.yaml": s.InitConfig(sec), "token.yaml": s.TokenConfig(sec),
+		"init-proxy.yaml": p.InitConfig(sec), "join-proxy.yaml": p.JoinConfig(p.Workers[0], false, sec, "sha256:"+strings.Repeat("a", 64)),
 		"join-cp.yaml": s.JoinConfig(s.ControlPlanes[1], true, sec, "sha256:"+strings.Repeat("a", 64)),
 		"join-w.yaml":  s.JoinConfig(s.Workers[0], false, sec, "sha256:"+strings.Repeat("a", 64)),
 	}

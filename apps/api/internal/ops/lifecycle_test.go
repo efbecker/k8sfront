@@ -45,6 +45,7 @@ var targetNode = regexp.MustCompile(`(?:node=|kubectl uncordon |kubectl delete n
 
 func lcClassify(script string) string {
 	markers := []struct{ marker, op string }{
+		{"K8SFRONT_APIPROXY_SYNC", "apiproxy"}, {"member remove", "etcd-member"},
 		{"APIs depreciadas", "precheck"}, {"snapshot save", "etcd-snapshot"}, {"pkgs.k8s.io/core:/stable", "repo"},
 		{"kubeadm upgrade apply", "kubeadm-apply"}, {"kubeadm upgrade node", "kubeadm-node"}, {"apt-mark unhold kubelet kubectl", "kubelet"},
 		{"kubectl cordon", "drain"}, {"kubeletVersion}'", "wait"}, {"kubectl uncordon", "uncordon"}, {"get nodes -o json", "get-nodes"},
@@ -126,6 +127,14 @@ func newLifecycleEnv(t *testing.T, f *lcFake, nodes []struct {
 	role store.NodeRole
 }) (*sqlite.DB, *jobs.Engine) {
 	t.Helper()
+	return newLifecycleEnvWith(t, f, nodes, "{}")
+}
+
+func newLifecycleEnvWith(t *testing.T, f *lcFake, nodes []struct {
+	name string
+	role store.NodeRole
+}, options string) (*sqlite.DB, *jobs.Engine) {
+	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
@@ -138,7 +147,7 @@ func newLifecycleEnv(t *testing.T, f *lcFake, nodes []struct {
 	sec := secrets.NewManager(db, v)
 	kc, _ := sec.Put(ctx, store.SecretKubeconfig, []byte("apiVersion: v1\nkind: Config\n"))
 	cl := &store.Cluster{ID: "c1", Name: "prod", KubernetesVersion: "v1.37.2", PodCIDR: "10.244.0.0/16", ServiceCIDR: "10.96.0.0/12",
-		CNI: "cilium", Topology: bootstrap.TopologyMulti, Options: []byte("{}"), Status: store.ClusterReady, KubeconfigSecretID: &kc}
+		CNI: "cilium", Topology: bootstrap.TopologyMulti, Options: []byte(options), Status: store.ClusterReady, KubeconfigSecretID: &kc}
 	if len(nodes) == 1 {
 		cl.Topology = bootstrap.TopologySingle
 	}
@@ -287,5 +296,76 @@ func TestNodeAddAndRemove(t *testing.T) {
 	}
 	if _, err := db.GetServer(ctx, "w2"); err == nil {
 		t.Fatal("server must be deleted from the inventory")
+	}
+}
+
+func TestControlPlaneAddAndRemoveWithLocalProxy(t *testing.T) {
+	ctx := context.Background()
+	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
+	// cp0 is the control plane being added (already attached by the API); it
+	// sorts first, so the job must not use it as the primary.
+	nodes := []struct {
+		name string
+		role store.NodeRole
+	}{{"cp0", store.RoleControlPlane}, {"cp1", store.RoleControlPlane}, {"w1", store.RoleWorker}}
+	db, engine := newLifecycleEnvWith(t, f, nodes, `{"endpointMode":"local-proxy"}`)
+	job, err := engine.Submit(ctx, KindNodeAdd, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "cp0"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, db, job.ID, store.JobSucceeded)
+	seq := []string{"cp0:apiproxy", "cp0:packages", "cp1:join-credentials", "cp0:join", "cp1:wait>k8s-cp0"}
+	for i := 1; i < len(seq); i++ {
+		if a, b := f.index(seq[i-1]), f.index(seq[i]); a < 0 || b < 0 || a > b {
+			t.Fatalf("%s must run before %s: %v", seq[i-1], seq[i], f.log)
+		}
+	}
+	for _, n := range []string{"cp1", "w1"} {
+		if i := f.index(n + ":apiproxy"); i < 0 || i > f.index("cp0:join") {
+			t.Fatalf("%s must learn the new control plane before it joins: %v", n, f.log)
+		}
+	}
+	if f.count("cp0:join-credentials") != 0 || f.count("cp1:join") != 0 {
+		t.Fatalf("the new control plane must not act as primary: %v", f.log)
+	}
+
+	job, err = engine.Submit(ctx, KindNodeRemove, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "cp0"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, db, job.ID, store.JobSucceeded)
+	seq = []string{"cp1:drain>k8s-cp0", "cp0:reset", "cp1:etcd-member", "cp1:delete-node>k8s-cp0"}
+	for i := 1; i < len(seq); i++ {
+		if a, b := f.index(seq[i-1]), f.index(seq[i]); a < 0 || b < 0 || a > b {
+			t.Fatalf("%s must run before %s: %v", seq[i-1], seq[i], f.log)
+		}
+	}
+	if f.count("cp1:apiproxy") != 2 || f.count("w1:apiproxy") != 2 || f.count("cp0:apiproxy") != 1 {
+		t.Fatalf("every remaining node drops the control plane from its proxy: %v", f.log)
+	}
+	if s, _ := db.GetServer(ctx, "cp0"); s.ClusterID != nil {
+		t.Fatal("removed control plane must be detached")
+	}
+	if cl, _ := db.GetCluster(ctx, "c1"); cl.APIServerURL != "https://"+f.hosts["cp1"]+":6443" {
+		t.Fatalf("API URL must point at a remaining control plane: %s", cl.APIServerURL)
+	}
+	// The last control plane stays.
+	job, _ = engine.Submit(ctx, KindNodeRemove, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "cp1"}, "test")
+	waitJob(t, db, job.ID, store.JobFailed)
+}
+
+func TestControlPlaneAddRefusedOnDirectEndpoint(t *testing.T) {
+	ctx := context.Background()
+	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
+	nodes := []struct {
+		name string
+		role store.NodeRole
+	}{{"cp1", store.RoleControlPlane}, {"cp2", store.RoleControlPlane}}
+	// Legacy options (no endpoint mode, no VIP): the spec itself is invalid.
+	db, engine := newLifecycleEnvWith(t, f, nodes, "{}")
+	job, _ := engine.Submit(ctx, KindNodeAdd, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "cp2"}, "test")
+	waitJob(t, db, job.ID, store.JobFailed)
+	if f.count("cp2:join") != 0 {
+		t.Fatal("must not join")
 	}
 }
