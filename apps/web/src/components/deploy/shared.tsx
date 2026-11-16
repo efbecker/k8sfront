@@ -102,12 +102,12 @@ export function ApplyResults({ summary, mode = "apply" }: { summary: ApplySummar
             const a = actionInfo[r.action];
             return (
               <TableRow key={i}>
-                <TableCell>
+                <TableCell className="whitespace-normal break-all">
                   <span className="text-muted-foreground">{r.kind}/</span>
                   <span className="font-medium">{r.name}</span>
                 </TableCell>
-                <TableCell className="text-sm">{r.namespace || "—"}</TableCell>
-                <TableCell>
+                <TableCell className="text-sm whitespace-normal break-all">{r.namespace || "—"}</TableCell>
+                <TableCell className="whitespace-normal">
                   <Badge variant={a.variant}>
                     <a.icon />
                     {summary.dryRun ? a.dry : a.label}
