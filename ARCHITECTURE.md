@@ -274,6 +274,8 @@ Erros: 409 `not_ready` sem kubeconfig, 502 `upstream` se a API do cluster não r
 A topologia usa informers compartilhados que só rodam enquanto há alguém assistindo (+2 min de folga); assinante
 lento é desconectado com `1013` e o cliente reconecta recebendo um snapshot novo. Um `/readyz` a cada 15 s alterna
 o estado entre `live` e `error`.
+A página tem modo tela cheia para telões de NOC (botão, tecla `F` ou `?kiosk=1` na URL, que abre já em tela cheia
+sem precisar de clique) com relógio, contadores grandes e a tela mantida acesa via Wake Lock quando o navegador permite.
 
 ### Endpoints previstos
 - _(Fase 3)_ `POST /clusters/{id}/nodes` (scale-up), `DELETE /clusters/{id}/nodes/{name}`.
