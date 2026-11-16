@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download, Loader2, Play, RotateCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
 import { JobRun } from "@/components/JobRun";
 import { CheckBadge, ClusterStatusBadge, JobStatusBadge, roleLabel } from "@/components/status";
@@ -11,11 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-function Fact({ k, v }: { k: string; v: React.ReactNode }) {
+function Fact({ k, v, className }: { k: string; v: React.ReactNode; className?: string }) {
   return (
-    <div>
+    <div className={cn("min-w-0", className)}>
       <div className="text-muted-foreground text-xs">{k}</div>
-      <div className="text-sm font-medium">{v}</div>
+      <div className="text-sm font-medium break-words">{v}</div>
     </div>
   );
 }
@@ -86,8 +87,8 @@ export function ClusterDetailPage() {
       {(start.error || del.error) && <p className="text-destructive mb-4 text-sm">{(start.error ?? del.error)?.message}</p>}
 
       <Card className="mb-6">
-        <CardContent className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
-          <Fact k="Endpoint da API" v={<span className="font-mono text-xs">{c.apiServerUrl || c.options.kubeVip?.address || "—"}</span>} />
+        <CardContent className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-4 xl:grid-cols-8">
+          <Fact className="col-span-2" k="Endpoint da API" v={<span className="font-mono text-xs">{c.apiServerUrl || c.options.kubeVip?.address || "—"}</span>} />
           <Fact k="Pod CIDR" v={<span className="font-mono text-xs">{c.podCidr}</span>} />
           <Fact k="Service CIDR" v={<span className="font-mono text-xs">{c.serviceCidr}</span>} />
           <Fact k="VIP (kube-vip)" v={c.options.kubeVip?.address ?? "não"} />

@@ -204,7 +204,15 @@ func (o *Ops) bootstrap(ctx context.Context, jc *jobs.Context) (err error) {
 		}
 	}
 	if spec.Options.MetricsServer {
-		if err := b.nodeStep(ctx, primary, "metrics-server", "metrics-server "+bootstrap.DefaultMetricsServer, bootstrap.MetricsServerScript); err != nil {
+		// The script bounds its own waits (nodes Ready 10m + rollout 5m); this
+		// is the backstop so a stuck SSH session can never hold the job forever.
+		mctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+		err := b.nodeStep(mctx, primary, "metrics-server", "metrics-server "+bootstrap.DefaultMetricsServer, bootstrap.MetricsServerScript)
+		cancel()
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return fmt.Errorf("metrics-server: tempo esgotado após 20m: %w", err)
+			}
 			return err
 		}
 	}
