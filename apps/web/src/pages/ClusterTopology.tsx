@@ -449,7 +449,8 @@ function Legend({ colorBy, namespaces, scene }: { colorBy: ColorMode; namespaces
         Um ou mais containers agendados num nó. Os pods orbitam o nó onde estão rodando e animam ao nascer, mudar de estado ou sair.
       </LegendItem>
       <LegendItem icon={<Diamond className="size-4" />} title="Service">
-        Endereço estável que balanceia tráfego entre os pods que casam com o seletor. As partículas indicam o caminho do tráfego.
+        Endereço estável que balanceia tráfego entre os pods que casam com o seletor. As partículas indicam o caminho do tráfego. Services sem
+        seletor (como o <span className="font-mono text-xs">kubernetes</span>, que aponta para a API) ligam-se aos nós por uma linha de traço longo.
       </LegendItem>
       {colorBy === "status" ? (
         <div className="space-y-1.5">
@@ -645,6 +646,23 @@ function Details({ model, hit, onSelect }: { model: TopologyModel; hit: Hit; onS
       <Row k="Seletor">
         <Labels labels={s.selector} />
       </Row>
+      {!!s.endpointIPs?.length && (
+        <Row k="Endpoints">
+          {s.endpointIPs.map((ip) => {
+            const n = [...model.nodes.values()].find((x) => x.internalIP === ip);
+            return (
+              <div key={ip} className="flex items-center gap-2">
+                <span className="font-mono text-xs">{ip}</span>
+                {n && (
+                  <button className="text-primary text-xs hover:underline" onClick={() => onSelect({ kind: "node", uid: n.uid })}>
+                    {n.name}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </Row>
+      )}
       <Row k="Idade">{age(s.created)}</Row>
       <PodList pods={pods} onSelect={onSelect} />
     </DetailShell>

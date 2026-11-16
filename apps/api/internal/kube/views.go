@@ -64,7 +64,11 @@ type Service struct {
 	ExternalIP []string          `json:"externalIPs,omitempty"`
 	Ports      []string          `json:"ports"`
 	Selector   map[string]string `json:"selector,omitempty"`
-	Created    time.Time         `json:"created"`
+	// EndpointIPs is only filled for services without a selector (e.g.
+	// default/kubernetes), whose backends come from hand-managed
+	// EndpointSlices: it lets the topology link them to nodes or pods.
+	EndpointIPs []string  `json:"endpointIPs,omitempty"`
+	Created     time.Time `json:"created"`
 }
 
 func nodeView(n *corev1.Node) Node {

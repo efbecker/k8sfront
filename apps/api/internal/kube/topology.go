@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -79,6 +80,13 @@ type Topology struct {
 	nodes    map[string]Node
 	pods     map[string]Pod
 	services map[string]Service
+	// slices: EndpointSlice "ns/name" → owning service "ns/name" and its ready IPs.
+	slices map[string]sliceInfo
+}
+
+type sliceInfo struct {
+	service string
+	ips     []string
 }
 
 func NewTopology(cs kubernetes.Interface, log *slog.Logger) *Topology {
@@ -154,7 +162,7 @@ func (t *Topology) stopLocked() {
 		t.cancel = nil
 	}
 	t.running, t.synced = false, false
-	t.nodes, t.pods, t.services = nil, nil, nil
+	t.nodes, t.pods, t.services, t.slices = nil, nil, nil, nil
 }
 
 func (t *Topology) startLocked() {
@@ -162,12 +170,14 @@ func (t *Topology) startLocked() {
 	t.cancel, t.running, t.synced = cancel, true, false
 	t.state, t.message = StateConnecting, ""
 	t.nodes, t.pods, t.services = map[string]Node{}, map[string]Pod{}, map[string]Service{}
+	t.slices = map[string]sliceInfo{}
 
 	factory := informers.NewSharedInformerFactoryWithOptions(t.cs, 0, informers.WithTransform(stripManagedFields))
 	nodeInf := factory.Core().V1().Nodes().Informer()
 	podInf := factory.Core().V1().Pods().Informer()
 	svcInf := factory.Core().V1().Services().Informer()
-	for _, inf := range []cache.SharedIndexInformer{nodeInf, podInf, svcInf} {
+	sliceInf := factory.Discovery().V1().EndpointSlices().Informer()
+	for _, inf := range []cache.SharedIndexInformer{nodeInf, podInf, svcInf, sliceInf} {
 		_ = inf.SetWatchErrorHandler(func(_ *cache.Reflector, err error) {
 			{
 				t.setStatus(ctx, StateError, "falha ao observar a API do Kubernetes: "+err.Error())
@@ -189,16 +199,21 @@ func (t *Topology) startLocked() {
 		UpdateFunc: func(_, o any) { t.onService(ctx, o, false) },
 		DeleteFunc: func(o any) { t.onService(ctx, o, true) },
 	})
+	_, _ = sliceInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(o any) { t.onSlice(ctx, o, false) },
+		UpdateFunc: func(_, o any) { t.onSlice(ctx, o, false) },
+		DeleteFunc: func(o any) { t.onSlice(ctx, o, true) },
+	})
 	factory.Start(ctx.Done())
 
 	go func() {
 		sctx, scancel := context.WithTimeout(ctx, topoSyncTimeout)
 		defer scancel()
-		if !cache.WaitForCacheSync(sctx.Done(), nodeInf.HasSynced, podInf.HasSynced, svcInf.HasSynced) {
+		if !cache.WaitForCacheSync(sctx.Done(), nodeInf.HasSynced, podInf.HasSynced, svcInf.HasSynced, sliceInf.HasSynced) {
 			if ctx.Err() == nil {
 				t.setStatus(ctx, StateError, "a API do Kubernetes não respondeu a tempo; tentando novamente")
 				// Keep waiting: informers retry on their own.
-				if !cache.WaitForCacheSync(ctx.Done(), nodeInf.HasSynced, podInf.HasSynced, svcInf.HasSynced) {
+				if !cache.WaitForCacheSync(ctx.Done(), nodeInf.HasSynced, podInf.HasSynced, svcInf.HasSynced, sliceInf.HasSynced) {
 					return
 				}
 			} else {
@@ -358,12 +373,85 @@ func (t *Topology) onService(ctx context.Context, o any, deleted bool) {
 			delete(t.services, v.UID)
 			return had
 		}
+		if len(v.Selector) == 0 {
+			v.EndpointIPs = t.endpointIPsLocked(v.Namespace + "/" + v.Name)
+		}
 		if old, had := t.services[v.UID]; had && reflect.DeepEqual(old, v) {
 			return false
 		}
 		t.services[v.UID] = v
 		return true
 	}, TopoEvent{Service: &v})
+}
+
+// onSlice tracks EndpointSlices; when the IPs behind a selectorless service
+// change, that service is re-sent with its new EndpointIPs.
+func (t *Topology) onSlice(ctx context.Context, o any, deleted bool) {
+	es, ok := tombstone(o).(*discoveryv1.EndpointSlice)
+	if !ok {
+		return
+	}
+	svcName := es.Labels[discoveryv1.LabelServiceName]
+	if svcName == "" {
+		return
+	}
+	key := es.Namespace + "/" + es.Name
+	info := sliceInfo{service: es.Namespace + "/" + svcName}
+	for _, ep := range es.Endpoints {
+		if ep.Conditions.Ready != nil && !*ep.Conditions.Ready {
+			continue
+		}
+		info.ips = append(info.ips, ep.Addresses...)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ctx.Err() != nil || !t.running {
+		return
+	}
+	old, had := t.slices[key]
+	if deleted {
+		delete(t.slices, key)
+		info = old
+	} else {
+		if had && reflect.DeepEqual(old, info) {
+			return
+		}
+		t.slices[key] = info
+	}
+	for uid, sv := range t.services {
+		if len(sv.Selector) != 0 || sv.Namespace+"/"+sv.Name != info.service {
+			continue
+		}
+		ips := t.endpointIPsLocked(info.service)
+		if reflect.DeepEqual(ips, sv.EndpointIPs) {
+			return
+		}
+		sv.EndpointIPs = ips
+		t.services[uid] = sv
+		if t.synced {
+			t.broadcastLocked(TopoEvent{Type: TopoUpsert, Kind: "service", UID: uid, Service: &sv, At: time.Now().UTC()})
+		}
+		return
+	}
+}
+
+// endpointIPsLocked returns the sorted, de-duplicated ready IPs of a service.
+func (t *Topology) endpointIPsLocked(service string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, si := range t.slices {
+		if si.service != service {
+			continue
+		}
+		for _, ip := range si.ips {
+			if !seen[ip] {
+				seen[ip] = true
+				out = append(out, ip)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // apply mutates the cache under the lock and, once the initial sync is done,

@@ -228,6 +228,8 @@ export interface K8sService {
   externalIPs?: string[];
   ports: string[];
   selector?: Record<string, string>;
+  /** Ready endpoint IPs, only for services without a selector (e.g. default/kubernetes). */
+  endpointIPs?: string[];
   created: string;
 }
 

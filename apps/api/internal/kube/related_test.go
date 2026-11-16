@@ -32,7 +32,7 @@ func TestRelatedObjects(t *testing.T) {
 		dep("api", map[string]string{"app": "api", "tier": "web"}),
 		svc("nginx", map[string]string{"app": "nginx"}),
 		svc("web", map[string]string{"tier": "web"}), // shared by both
-		svc("ext", nil),                              // no selector
+		svc("ext", nil), // no selector
 		ing("nginx", "nginx"),
 		ing("mixed", "nginx", "web"),
 	)

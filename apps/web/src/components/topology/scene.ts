@@ -108,6 +108,8 @@ export class TopologyScene {
   private visiblePods: K8sPod[] = [];
   private visibleServices: K8sService[] = [];
   private svcEdges: [string, string][] = [];
+  /** Selectorless services whose endpoints are node IPs (kube-apiserver on control planes). */
+  private svcNodeEdges: [string, string][] = [];
   private unscheduledAnchor = { x: 0, y: 0 };
   private hasUnscheduled = false;
   private nodeUidByName = new Map<string, string>();
@@ -244,6 +246,9 @@ export class TopologyScene {
 
     // Services: centroid of their pods, nudged toward the middle, then relaxed.
     this.svcEdges = [];
+    this.svcNodeEdges = [];
+    const nodeByIP = new Map(nodes.filter((n) => n.internalIP).map((n) => [n.internalIP, n]));
+    const podByIP = new Map(this.visiblePods.filter((p) => p.ip).map((p) => [p.ip!, p]));
     const svcSprites: Sprite[] = [];
     const nodeSprites = nodes.map((n) => this.sprites.get(n.uid)!);
     for (const svc of this.visibleServices) {
@@ -258,6 +263,21 @@ export class TopologyScene {
           cx += ps.tx;
           cy += ps.ty;
           count++;
+        }
+      }
+      // No selector: follow the EndpointSlice IPs to nodes (or pods) instead.
+      if (!Object.keys(svc.selector ?? {}).length) {
+        for (const ip of svc.endpointIPs ?? []) {
+          const n = nodeByIP.get(ip);
+          const p = n ? undefined : podByIP.get(ip);
+          const target = n ? this.sprites.get(n.uid) : p ? this.sprites.get(p.uid) : undefined;
+          if (n) this.svcNodeEdges.push([svc.uid, n.uid]);
+          else if (p) this.svcEdges.push([svc.uid, p.uid]);
+          if (target) {
+            cx += target.tx;
+            cy += target.ty;
+            count++;
+          }
         }
       }
       let tx: number;
@@ -360,12 +380,14 @@ export class TopologyScene {
       if (sel.kind === "node") {
         const n = m.nodes.get(sel.uid);
         for (const p of this.visiblePods) if (n && p.node === n.name) rel.add(p.uid);
+        for (const [su, nu] of this.svcNodeEdges) if (nu === sel.uid) rel.add(su);
       } else if (sel.kind === "pod") {
         const p = m.pods.get(sel.uid);
         for (const n of m.nodes.values()) if (p && n.name === p.node) rel.add(n.uid);
         for (const [s, pu] of this.svcEdges) if (pu === sel.uid) rel.add(s);
       } else {
         for (const [s, pu] of this.svcEdges) if (s === sel.uid) rel.add(pu);
+        for (const [su, nu] of this.svcNodeEdges) if (su === sel.uid) rel.add(nu);
       }
     }
     this.related = rel;
@@ -621,6 +643,41 @@ export class TopologyScene {
           ctx.globalAlpha = Math.sin(f * Math.PI) * 0.9 * Math.min(a.scale, b.scale);
           ctx.beginPath();
           ctx.arc(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    // Service → node edges (selectorless services such as default/kubernetes):
+    // longer dashes and a heavier stroke set them apart from service → pod.
+    if (this.svcNodeEdges.length) {
+      ctx.strokeStyle = pal.primary;
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([10, 5]);
+      for (const [su, nu] of this.svcNodeEdges) {
+        const a = this.sprites.get(su);
+        const b = this.sprites.get(nu);
+        if (!a || !b) continue;
+        const on = !hasSel || (this.related.has(su) && this.related.has(nu));
+        ctx.globalAlpha = (on ? 0.65 : 0.1) * Math.min(a.scale, b.scale);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1 / Math.max(cam.k, 0.5);
+      if (this.opts.traffic) {
+        ctx.fillStyle = pal.primary;
+        for (const [su, nu] of this.svcNodeEdges) {
+          const a = this.sprites.get(su);
+          const b = this.sprites.get(nu);
+          const n = m.nodes.get(nu);
+          if (!a || !b || !n?.ready || (hasSel && !(this.related.has(su) && this.related.has(nu)))) continue;
+          const f = (t / 1600 + hash(su + nu)) % 1;
+          ctx.globalAlpha = Math.sin(f * Math.PI) * 0.9 * Math.min(a.scale, b.scale);
+          ctx.beginPath();
+          ctx.arc(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 2.6, 0, Math.PI * 2);
           ctx.fill();
         }
       }

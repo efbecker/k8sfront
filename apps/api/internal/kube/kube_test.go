@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -196,5 +197,38 @@ func TestTopologyStopsWhenIdle(t *testing.T) {
 			t.Fatal("informers still running after idle timeout")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestTopologySelectorlessServiceGetsEndpointIPs(t *testing.T) {
+	ctx := context.Background()
+	ready := true
+	cs := fake.NewClientset(
+		node("n1", true, true),
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "kubernetes", UID: "svc-k"}, Spec: corev1.ServiceSpec{ClusterIP: "10.96.0.1"}},
+		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "kubernetes",
+			Labels: map[string]string{discoveryv1.LabelServiceName: "kubernetes"}},
+			Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready}}}},
+	)
+	topo := NewTopology(cs, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer topo.Stop()
+	sub, _ := topo.Subscribe()
+	var snap TopoEvent
+	for snap.Type != TopoSnapshot {
+		snap = recv(t, sub)
+	}
+	if len(snap.Services) != 1 || len(snap.Services[0].EndpointIPs) != 1 || snap.Services[0].EndpointIPs[0] != "10.0.0.1" {
+		t.Fatalf("services = %+v", snap.Services)
+	}
+	// A second control plane joins: the service is re-sent with both IPs.
+	_, err := cs.DiscoveryV1().EndpointSlices("default").Update(ctx, &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "kubernetes",
+		Labels: map[string]string{discoveryv1.LabelServiceName: "kubernetes"}},
+		Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}, {Addresses: []string{"10.0.0.2"}}}}, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := recv(t, sub)
+	if ev.Type != TopoUpsert || ev.Kind != "service" || len(ev.Service.EndpointIPs) != 2 {
+		t.Fatalf("upsert = %+v", ev)
 	}
 }
