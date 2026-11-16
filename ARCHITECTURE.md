@@ -287,6 +287,8 @@ sem precisar de clique) com relógio, contadores grandes e a tela mantida acesa 
 | POST | `/clusters/{id}/apply` | `{manifest, namespace, dryRun}`: YAML multi-documento (até 200 objetos), Namespaces/CRDs primeiro, server-side apply (`fieldManager=k8sfront`, `force`), `dryRun=All` |
 | POST | `/clusters/{id}/delete` | `{manifest \| objects[] \| app, namespace, keepNamespaces, dryRun}`: exclui em ordem inversa (Namespaces por último, propagação `Background`); resultado `deleted`/`absent`/`error`; nada em `kube-system`, `kube-public`, `kube-node-lease` (nem o namespace `default` nem o Service `default/kubernetes`). A UI sempre roda o dry-run antes e pede o nome digitado; auditado como `deploy.delete` |
 | GET | `/clusters/{id}/k8s/workloads/{ns}/{kind}/{name}/related` | Services cujo seletor pega só este workload (nenhum outro) e Ingresses cujos backends são todos esses Services; a UI oferece excluí-los junto |
+| GET | `/servers/{id}/removal` | Prévia de "Remover servidor": fora de cluster só sai do inventário; worker de cluster lista os pods do nó (movidos, DaemonSet, bloqueiam o drain) e avisos; control plane ou cluster sem bootstrap vem com `blocked` |
+| POST | `/servers/{id}/remove` | Servidor livre: apaga do inventário (200). Worker: job `cluster.node-remove` com `deleteServer` (cordon → drain respeitando PDBs → delete node → kubeadm reset → apaga do inventário; falha no drain pausa o job). Control plane: 409 |
 | GET | `/clusters/{id}/helm/releases` | releases pelos **metadados** dos Secrets `owner=helm` (o payload com values nunca é lido) |
 | POST | `/clusters/{id}/helm` | job `cluster.helm`: `helm upgrade --install --wait` ou `uninstall` no CP primário; values cifrados no cofre (`helm_values`) e apagados no sucesso |
 

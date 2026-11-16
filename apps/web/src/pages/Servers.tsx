@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, Plus, ServerCog, Stethoscope } from "lucide-react";
-import { api } from "@/lib/api";
+import { Loader2, Plus, ServerCog, Stethoscope, Trash2 } from "lucide-react";
+import { api, type Server } from "@/lib/api";
+import { RemoveServerDialog } from "@/components/servers/RemoveServerDialog";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
 import { CheckBadge, roleLabel, sudoLabel } from "@/components/status";
@@ -16,6 +17,7 @@ export function ServersPage() {
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [removing, setRemoving] = useState<Server>();
   const servers = useQuery({ queryKey: ["servers"], queryFn: api.servers });
   const test = useMutation({
     mutationFn: (ids: string[]) => (ids.length === 1 ? api.preflight(ids[0]!) : api.preflightMany(ids)),
@@ -120,6 +122,9 @@ export function ServersPage() {
                       <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate([s.id])}>
                         <Stethoscope /> Testar
                       </Button>
+                      <Button size="icon" variant="ghost" className="ml-1 size-8" title={`Remover ${s.name}`} onClick={() => setRemoving(s)}>
+                        <Trash2 className="text-destructive" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -128,6 +133,7 @@ export function ServersPage() {
           )}
         </CardContent>
       </Card>
+      {removing && <RemoveServerDialog server={removing} open onOpenChange={(o) => !o && setRemoving(undefined)} />}
       {adding && <ServerFormDialog open={adding} onOpenChange={setAdding} onSaved={(s) => navigate(`/servers/${s.id}`)} />}
     </>
   );

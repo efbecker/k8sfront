@@ -330,6 +330,25 @@ export interface ApplyResult {
   note?: string;
 }
 
+export interface RemovalPod {
+  namespace: string;
+  name: string;
+  ownerKind?: string;
+  ownerName?: string;
+  fate: "moves" | "daemon" | "blocks" | "done";
+  emptyDir?: boolean;
+}
+
+export interface ServerRemoval {
+  inCluster: boolean;
+  clusterId?: string;
+  clusterName?: string;
+  role: string;
+  blocked?: string;
+  warnings: string[];
+  node?: { nodeName: string; pods: RemovalPod[]; otherSchedulable: number };
+}
+
 export interface ObjectRef {
   apiVersion: string;
   kind: string;
@@ -482,6 +501,9 @@ export const api = {
   createServer: (input: ServerInput) => request<Server>("POST", "/servers", input),
   updateServer: (id: string, input: ServerInput) => request<Server>("PATCH", `/servers/${id}`, input),
   deleteServer: (id: string) => request<void>("DELETE", `/servers/${id}`),
+  serverRemoval: (id: string) => request<ServerRemoval>("GET", `/servers/${id}/removal`),
+  /** Free server: {deleted:true}. Cluster worker: the graceful removal job. */
+  removeServer: (id: string) => request<Job | { deleted: true }>("POST", `/servers/${id}/remove`),
   hostKey: (id: string) =>
     request<{ hostPort: string; keyType: string; fingerprint: string; firstSeen: string; lastSeen: string }>(
       "GET",

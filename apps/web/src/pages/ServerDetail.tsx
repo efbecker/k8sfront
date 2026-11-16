@@ -9,6 +9,7 @@ import { CheckBadge, CheckIcon, JobStatusBadge, roleLabel, sudoLabel } from "@/c
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RemoveServerDialog } from "@/components/servers/RemoveServerDialog";
 import { ServerFormDialog } from "./ServerForm";
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
@@ -65,13 +66,7 @@ export function ServerDetailPage() {
   const jobs = useQuery({ queryKey: ["jobs", { targetId: id }], queryFn: () => api.jobs({ targetId: id, limit: 10 }) });
 
   const test = useMutation({ mutationFn: () => api.preflight(id), onSuccess: (j) => navigate(`/jobs/${j.id}`) });
-  const del = useMutation({
-    mutationFn: () => api.deleteServer(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["servers"] });
-      navigate("/servers");
-    },
-  });
+  const [removing, setRemoving] = useState(false);
   const resetKey = useMutation({
     mutationFn: () => api.resetHostKey(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["server", id, "host-key"] }),
@@ -94,14 +89,10 @@ export function ServerDetailPage() {
             <Button variant="outline" onClick={() => setEditing(true)}>
               <Pencil /> Editar
             </Button>
-            <Button
-              variant="outline"
-              className="text-destructive"
-              disabled={del.isPending}
-              onClick={() => confirm(`Remover ${s.name} do inventário? As credenciais cifradas serão apagadas.`) && del.mutate()}
-            >
+            <Button variant="outline" className="text-destructive" onClick={() => setRemoving(true)}>
               <Trash2 /> Remover
             </Button>
+            <RemoveServerDialog server={s} open={removing} onOpenChange={setRemoving} onRemoved={() => navigate("/servers")} />
             <Button disabled={test.isPending} onClick={() => test.mutate()}>
               {test.isPending ? <Loader2 className="animate-spin" /> : <Stethoscope />}
               Testar Conexão & Pré-requisitos
@@ -109,7 +100,7 @@ export function ServerDetailPage() {
           </>
         }
       />
-      {(test.error || del.error) && <p className="text-destructive mb-4 text-sm">{(test.error ?? del.error)?.message}</p>}
+      {test.error && <p className="text-destructive mb-4 text-sm">{test.error.message}</p>}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card>

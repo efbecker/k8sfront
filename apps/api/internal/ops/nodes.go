@@ -14,6 +14,9 @@ import (
 type NodeParams struct {
 	ClusterID string `json:"clusterId"`
 	ServerID  string `json:"serverId"`
+	// DeleteServer also removes the server from the inventory at the end
+	// (the "Remover servidor" action on the Servers page).
+	DeleteServer bool `json:"deleteServer,omitempty"`
 }
 
 // DrainParams target a Kubernetes node by name.
@@ -130,6 +133,13 @@ func (o *Ops) nodeRemove(ctx context.Context, jc *jobs.Context) error {
 	srv.ClusterID = nil
 	if err := o.Store.UpdateServer(context.Background(), srv); err != nil {
 		return err
+	}
+	if p.DeleteServer {
+		if err := o.Store.DeleteServer(context.Background(), srv.ID); err != nil {
+			return fmt.Errorf("nó removido do cluster, mas não foi possível apagar o servidor do inventário: %w", err)
+		}
+		jc.Logf(nil, "✔ %s removido do cluster e do inventário", n.Name)
+		return nil
 	}
 	jc.Logf(nil, "✔ %s removido do cluster e liberado no inventário", n.Name)
 	return nil

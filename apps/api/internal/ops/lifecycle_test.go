@@ -278,4 +278,14 @@ func TestNodeAddAndRemove(t *testing.T) {
 	}
 	job, _ = engine.Submit(ctx, KindNodeRemove, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "cp1"}, "test")
 	waitJob(t, db, job.ID, store.JobFailed)
+
+	// "Remover servidor": same graceful flow, then gone from the inventory.
+	job, _ = engine.Submit(ctx, KindNodeRemove, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "w2", DeleteServer: true}, "test")
+	waitJob(t, db, job.ID, store.JobSucceeded)
+	if f.index("cp1:drain>k8s-w2") < 0 || f.index("w2:reset") < f.index("cp1:delete-node>k8s-w2") {
+		t.Fatalf("unexpected order: %v", f.log)
+	}
+	if _, err := db.GetServer(ctx, "w2"); err == nil {
+		t.Fatal("server must be deleted from the inventory")
+	}
 }

@@ -54,6 +54,8 @@ func (s *Server) Handler() http.Handler {
 	priv("GET /api/v1/servers/{id}", s.getServer)
 	priv("PATCH /api/v1/servers/{id}", s.updateServer)
 	priv("DELETE /api/v1/servers/{id}", s.deleteServer)
+	priv("GET /api/v1/servers/{id}/removal", s.serverRemovalPlan)
+	priv("POST /api/v1/servers/{id}/remove", s.removeServer)
 	priv("GET /api/v1/servers/{id}/host-key", s.getHostKey)
 	priv("DELETE /api/v1/servers/{id}/host-key", s.resetHostKey)
 	priv("POST /api/v1/servers/{id}/preflight", s.preflightOne)
