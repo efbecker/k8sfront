@@ -139,6 +139,10 @@ func TestDeployAPI(t *testing.T) {
 	if code := call(t, ts, "POST", "/api/v1/clusters/c1/delete", map[string]any{"objects": []any{}}, &e); code != 400 || e.Error != "validation" {
 		t.Fatalf("empty delete: %d %+v", code, e)
 	}
+	bad := map[string]any{"objects": []any{map[string]string{"apiVersion": "v1", "kind": "Service", "namespace": "a", "name": "b"}}, "alsoNamespaces": []string{"Bad_NS"}}
+	if code := call(t, ts, "POST", "/api/v1/clusters/c1/delete", bad, &e); code != 400 {
+		t.Fatalf("bad alsoNamespaces: %d %+v", code, e)
+	}
 
 	var job store.Job
 	in := map[string]any{"release": "redis", "namespace": "cache", "chart": "redis", "repo": "https://charts.example.com", "values": "auth:\n  password: topsecret\n"}

@@ -363,6 +363,23 @@ export interface DeleteRequest {
   app?: AppSpec;
   namespace?: string;
   keepNamespaces?: boolean;
+  alsoNamespaces?: string[];
+}
+
+export interface NSItem {
+  apiVersion: string;
+  kind: string;
+  name: string;
+}
+
+export interface NamespaceUsage {
+  name: string;
+  phase: string;
+  created: string;
+  system: boolean;
+  pods: number;
+  counts: Record<string, number>;
+  items: NSItem[];
 }
 
 export interface ApplySummary {
@@ -546,6 +563,8 @@ export const api = {
     request<ApplySummary>("POST", `/clusters/${id}/apply`, { manifest, namespace, dryRun }),
   workloadRelated: (id: string, ns: string, kind: string, name: string) =>
     request<ObjectRef[]>("GET", `/clusters/${id}/k8s/workloads/${encodeURIComponent(ns)}/${kind}/${encodeURIComponent(name)}/related`),
+  namespaceUsage: (id: string, ns?: string) =>
+    request<NamespaceUsage[]>("GET", `/clusters/${id}/k8s/namespaces-usage${ns ? `/${encodeURIComponent(ns)}` : ""}`),
   deleteObjects: (id: string, req: DeleteRequest, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/delete`, { ...req, dryRun }),
   helmReleases: (id: string) => request<HelmRelease[]>("GET", `/clusters/${id}/helm/releases`),
   helm: (id: string, input: HelmInput) => request<Job>("POST", `/clusters/${id}/helm`, input),

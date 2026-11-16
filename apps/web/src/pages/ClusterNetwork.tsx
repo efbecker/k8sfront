@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Lock, Star } from "lucide-react";
-import { api, type ObjectRef } from "@/lib/api";
+import { Loader2, Lock, Star, Trash2 } from "lucide-react";
+import { api, type NamespaceUsage, type ObjectRef } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { DeleteCell, DeleteDialog } from "@/components/deploy/shared";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
@@ -11,7 +12,100 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type Tab = "services" | "ingresses" | "pvcs" | "pvs" | "storageClasses";
+type Tab = "namespaces" | "services" | "ingresses" | "pvcs" | "pvs" | "storageClasses";
+
+const sum = (u: NamespaceUsage, kinds: string[]) => kinds.reduce((n, k) => n + (u.counts[k] ?? 0), 0);
+
+function Count({ n, danger }: { n: number; danger?: boolean }) {
+  return <span className={"tabular-nums " + (n === 0 ? "text-muted-foreground" : danger ? "text-warning font-medium" : "")}>{n}</span>;
+}
+
+/** Namespaces with what is in each; deleting one shows everything it takes along. */
+function NamespacesTab({ clusterId }: { clusterId: string }) {
+  const usage = useQuery({ queryKey: ["namespaces-usage", clusterId], queryFn: () => api.namespaceUsage(clusterId), refetchInterval: 15_000 });
+  const [del, setDel] = useState<string>();
+  if (usage.isLoading) return <Loader2 className="text-muted-foreground animate-spin" />;
+  if (usage.error) return <KubeError error={usage.error} />;
+  const list = usage.data ?? [];
+  return (
+    <Card className="py-0">
+      <CardContent className="px-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Namespace</TableHead>
+              <TableHead>Workloads</TableHead>
+              <TableHead>Pods</TableHead>
+              <TableHead>Services</TableHead>
+              <TableHead>Ingresses</TableHead>
+              <TableHead>PVCs</TableHead>
+              <TableHead>Helm</TableHead>
+              <TableHead>Outros</TableHead>
+              <TableHead>Idade</TableHead>
+              <TableHead className="w-12" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.map((u) => (
+              <TableRow key={u.name}>
+                <TableCell>
+                  <div className="flex items-center gap-2 font-medium">
+                    {u.name}
+                    {u.system && <Badge variant="secondary">sistema</Badge>}
+                    {u.phase === "Terminating" && <Badge variant="warning">excluindo</Badge>}
+                    {!u.system && u.items.length === 0 && u.pods === 0 && <Badge variant="outline">vazio</Badge>}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job"])} />
+                </TableCell>
+                <TableCell>
+                  <Count n={u.pods} />
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["Service"])} />
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["Ingress"])} />
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["PersistentVolumeClaim"])} danger />
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["HelmRelease"])} />
+                </TableCell>
+                <TableCell>
+                  <Count n={sum(u, ["ConfigMap", "Secret", "ServiceAccount", "Pod"])} />
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">{age(u.created)}</TableCell>
+                {u.system || u.phase === "Terminating" ? (
+                  <TableCell />
+                ) : (
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon" title={`Excluir namespace ${u.name}`} onClick={() => setDel(u.name)}>
+                      <Trash2 className="text-destructive" />
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+            {list.length === 0 && <Empty cols={10} />}
+          </TableBody>
+        </Table>
+      </CardContent>
+      {del && (
+        <DeleteDialog
+          clusterId={clusterId}
+          request={{ objects: [{ apiVersion: "v1", kind: "Namespace", name: del }] }}
+          title={`Excluir o namespace ${del}?`}
+          confirmWord={del}
+          open
+          onOpenChange={(o) => !o && setDel(undefined)}
+        />
+      )}
+    </Card>
+  );
+}
 
 export function ClusterNetworkPage() {
   const { id = "" } = useParams();
@@ -30,6 +124,7 @@ export function ClusterNetworkPage() {
           value={tab}
           onChange={setTab}
           items={[
+            { id: "namespaces", label: "Namespaces" },
             { id: "services", label: "Services", count: d?.services.length },
             { id: "ingresses", label: "Ingresses", count: d?.ingresses.length },
             { id: "pvcs", label: "PVCs", count: d?.pvcs.length },
@@ -37,12 +132,16 @@ export function ClusterNetworkPage() {
             { id: "storageClasses", label: "StorageClasses", count: d?.storageClasses.length },
           ]}
         />
-        <div className="ml-auto flex items-center gap-3">
-          {d && <span className="text-muted-foreground text-xs">{d.networkPolicies} NetworkPolicies</span>}
-          <NamespacePicker clusterId={id} value={ns} onChange={setNs} />
-        </div>
+        {tab !== "namespaces" && (
+          <div className="ml-auto flex items-center gap-3">
+            {d && <span className="text-muted-foreground text-xs">{d.networkPolicies} NetworkPolicies</span>}
+            <NamespacePicker clusterId={id} value={ns} onChange={setNs} />
+          </div>
+        )}
       </div>
-      {data.isLoading ? (
+      {tab === "namespaces" ? (
+        <NamespacesTab clusterId={id} />
+      ) : data.isLoading ? (
         <Loader2 className="text-muted-foreground animate-spin" />
       ) : data.error ? (
         <KubeError error={data.error} />

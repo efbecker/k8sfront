@@ -81,6 +81,32 @@ func (s *Server) kubeNamespaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ns)
 }
 
+// namespaceUsage lists namespaces with what is inside each (for the
+// Namespaces screen and the "namespace still in use" checks on delete).
+func (s *Server) namespaceUsage(w http.ResponseWriter, r *http.Request) {
+	ns := r.PathValue("ns")
+	if ns != "" && !namespaceRe.MatchString(ns) {
+		writeError(w, http.StatusBadRequest, "validation", "namespace inválido")
+		return
+	}
+	cl, ok := s.kubeCluster(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), kube.RequestTimeout)
+	defer cancel()
+	out, err := kube.NamespaceInventory(ctx, cl.Client, cl.Metadata, ns)
+	if apierrors.IsNotFound(err) {
+		writeError(w, http.StatusNotFound, "not_found", "namespace não encontrado")
+		return
+	}
+	if err != nil {
+		s.kubeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) kubeWorkloads(w http.ResponseWriter, r *http.Request) {
 	ns, ok := namespaceParam(w, r)
 	if !ok {

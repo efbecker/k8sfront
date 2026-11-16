@@ -152,7 +152,10 @@ func (s *Server) deleteObjects(w http.ResponseWriter, r *http.Request) {
 		Namespace string             `json:"namespace"`
 		// KeepNamespaces skips Namespace objects of the manifest.
 		KeepNamespaces bool `json:"keepNamespaces"`
-		DryRun         bool `json:"dryRun"`
+		// AlsoNamespaces adds whole namespaces (deleted last), offered by the
+		// UI when the deletion leaves them empty.
+		AlsoNamespaces []string `json:"alsoNamespaces"`
+		DryRun         bool     `json:"dryRun"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
@@ -199,6 +202,29 @@ func (s *Server) deleteObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if len(in.AlsoNamespaces) > 0 {
+		refs := make([]deploy.ObjectRef, 0, len(in.AlsoNamespaces))
+		for _, n := range in.AlsoNamespaces {
+			if !namespaceRe.MatchString(n) {
+				writeError(w, http.StatusBadRequest, "validation", "namespace inválido")
+				return
+			}
+			refs = append(refs, deploy.ObjectRef{APIVersion: "v1", Kind: "Namespace", Name: n})
+		}
+		extra, err := deploy.FromRefs(refs)
+		if err == nil && len(objs)+len(extra) > deploy.MaxObjects {
+			err = deploy.ErrInvalid
+		}
+		if err != nil {
+			writeValidation(w, err)
+			return
+		}
+		for _, e := range extra {
+			if !containsNamespace(objs, e.GetName()) {
+				objs = append(objs, e)
+			}
+		}
+	}
 	a, ok := s.applier(w, r)
 	if !ok {
 		return
@@ -206,6 +232,15 @@ func (s *Server) deleteObjects(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), applyTimeout)
 	defer cancel()
 	s.finishApply(w, r, "deploy.delete", objs, a.Delete(ctx, objs, in.Namespace, in.DryRun))
+}
+
+func containsNamespace(objs []*unstructured.Unstructured, name string) bool {
+	for _, u := range objs {
+		if u.GetKind() == "Namespace" && u.GetName() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) helmReleases(w http.ResponseWriter, r *http.Request) {

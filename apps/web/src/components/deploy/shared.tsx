@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { CheckCircle2, CircleAlert, CircleDashed, Loader2, MinusCircle, PencilLine, Trash2 } from "lucide-react";
-import type { ApplySummary, DeleteRequest, Job, ObjectRef } from "@/lib/api";
+import type { ApplySummary, DeleteRequest, Job, NSItem, ObjectRef } from "@/lib/api";
 import { api, jobKindLabel } from "@/lib/api";
 import { JobStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -206,25 +206,31 @@ export function DeleteDialog({
 }) {
   const qc = useQueryClient();
   const [typed, setTyped] = useState("");
-  const check = useMutation({ mutationFn: () => api.deleteObjects(clusterId, request, true) });
+  // Namespaces the operator chose to delete too because they end up empty.
+  const [alsoNs, setAlsoNs] = useState<string[]>([]);
+  const effective: DeleteRequest = alsoNs.length ? { ...request, alsoNamespaces: alsoNs } : request;
+  const [checked, setChecked] = useState<ApplySummary>();
+  const check = useMutation({ mutationFn: () => api.deleteObjects(clusterId, effective, true), onSuccess: setChecked });
   const run = useMutation({
-    mutationFn: () => api.deleteObjects(clusterId, request, false),
+    mutationFn: () => api.deleteObjects(clusterId, effective, false),
     onSuccess: () => {
-      for (const k of ["workloads", "namespaces", "network", "overview", "helm"]) qc.invalidateQueries({ queryKey: [k, clusterId] });
+      for (const k of ["workloads", "namespaces", "namespaces-usage", "network", "overview", "helm"]) qc.invalidateQueries({ queryKey: [k, clusterId] });
       onDeleted?.();
     },
   });
-  const reqKey = JSON.stringify(request);
+  const reqKey = JSON.stringify(effective);
   useEffect(() => {
     if (open) {
       run.reset();
       check.mutate();
     } else {
       setTyped("");
+      setAlsoNs([]);
+      setChecked(undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, reqKey]);
-  const toDelete = check.data?.results.filter((r) => r.action === "deleted").length ?? 0;
+  const toDelete = checked?.results.filter((r) => r.action === "deleted").length ?? 0;
   const done = run.data;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -235,15 +241,23 @@ export function DeleteDialog({
             {done ? "Resultado da exclusão." : "A lista abaixo vem de um dry-run no servidor: é exatamente o que será removido. Não dá para desfazer."}
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[50vh] space-y-3 overflow-y-auto">
+        <div className="max-h-[55vh] space-y-3 overflow-y-auto">
           {!done && extra}
-          {check.isPending && (
+          {check.isPending && !checked && (
             <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <Loader2 className="size-4 animate-spin" /> Verificando o que será excluído…
             </div>
           )}
           <ErrorText error={check.error ?? run.error} />
-          {(done ?? check.data) && <ApplyResults summary={(done ?? check.data)!} mode="delete" />}
+          {!done && checked && (
+            <NamespaceImpact
+              clusterId={clusterId}
+              summary={checked}
+              alsoNs={alsoNs}
+              onToggle={(ns, on) => setAlsoNs((cur) => (on ? [...cur.filter((x) => x !== ns), ns] : cur.filter((x) => x !== ns)))}
+            />
+          )}
+          {(done ?? checked) && <ApplyResults summary={(done ?? checked)!} mode="delete" />}
           {!done && toDelete > 0 && (
             <Field label={`Digite ${confirmWord} para confirmar`}>
               <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={confirmWord} autoComplete="off" />
@@ -255,13 +269,106 @@ export function DeleteDialog({
             {done ? "Fechar" : "Voltar"}
           </Button>
           {!done && (
-            <Button variant="destructive" disabled={toDelete === 0 || typed.trim() !== confirmWord || run.isPending} onClick={() => run.mutate()}>
+            <Button variant="destructive" disabled={toDelete === 0 || typed.trim() !== confirmWord || run.isPending || check.isPending} onClick={() => run.mutate()}>
               {run.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />} Excluir {toDelete > 0 ? `${toDelete} objeto(s)` : ""}
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const kindLabel: Record<string, string> = { PersistentVolumeClaim: "PVC", HelmRelease: "release Helm" };
+const itemText = (i: NSItem) => `${kindLabel[i.kind] ?? i.kind} ${i.name}`;
+
+function listText(items: NSItem[], max = 8) {
+  const shown = items.slice(0, max).map(itemText).join(", ");
+  return items.length > max ? `${shown} e mais ${items.length - max}` : shown;
+}
+
+/**
+ * What a deletion does to namespaces: a deleted namespace takes everything in
+ * it (listed, PVCs in red); a namespace that ends up empty can be deleted too
+ * (opt-in); one still in use says by what.
+ */
+function NamespaceImpact({
+  clusterId,
+  summary,
+  alsoNs,
+  onToggle,
+}: {
+  clusterId: string;
+  summary: ApplySummary;
+  alsoNs: string[];
+  onToggle: (ns: string, on: boolean) => void;
+}) {
+  const deleted = summary.results.filter((r) => r.action === "deleted");
+  const nsDeleted = deleted.filter((r) => r.kind === "Namespace").map((r) => r.name);
+  const ownNs = nsDeleted.filter((n) => !alsoNs.includes(n));
+  const touched = [...new Set(deleted.filter((r) => r.namespace).map((r) => r.namespace!))].filter((n) => !systemNS.has(n) && n !== "default" && !ownNs.includes(n));
+  const names = [...new Set([...nsDeleted, ...touched])].sort();
+  const usage = useQueries({
+    queries: names.map((n) => ({ queryKey: ["namespaces-usage", clusterId, n], queryFn: () => api.namespaceUsage(clusterId, n).then((l) => l[0]), staleTime: 5_000 })),
+  });
+  const byName = new Map(names.map((n, i) => [n, usage[i]?.data]));
+  const pvcs = deleted.filter((r) => r.kind === "PersistentVolumeClaim");
+  const boxes: ReactNode[] = [];
+  if (pvcs.length > 0) {
+    boxes.push(
+      <Alert key="pvc">
+        Os volumes {pvcs.map((r) => r.name).join(", ")} serão excluídos. Os dados neles podem ser perdidos de vez, conforme a reclaim policy da StorageClass.
+      </Alert>,
+    );
+  }
+  for (const n of ownNs) {
+    const u = byName.get(n);
+    if (!u) continue;
+    const items = u.items.filter((i) => !deleted.some((d) => d.namespace === n && d.kind === i.kind && d.name === i.name));
+    const nsPvcs = items.filter((i) => i.kind === "PersistentVolumeClaim");
+    boxes.push(
+      <div key={"ns-" + n} className={"rounded-md border px-3 py-2 text-sm " + (nsPvcs.length ? "border-destructive/40 bg-destructive/10" : "border-warning/40 bg-warning/10")}>
+        {items.length === 0 ? (
+          <>O namespace {n} será excluído (não há mais nada nele).</>
+        ) : (
+          <>
+            Excluir o namespace <b>{n}</b> apaga também tudo o que está dentro dele ({u.pods} pod(s)): {listText(items)}.
+            {nsPvcs.length > 0 && <div className="text-destructive mt-1 font-medium">Inclui {nsPvcs.length} PVC(s): os dados desses volumes podem ser perdidos.</div>}
+          </>
+        )}
+      </div>,
+    );
+  }
+  for (const n of touched) {
+    const u = byName.get(n);
+    if (!u) continue;
+    const remaining = u.items.filter((i) => !deleted.some((d) => d.namespace === n && d.kind === i.kind && d.name === i.name));
+    if (remaining.length === 0) {
+      boxes.push(
+        <label key={"t-" + n} className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm">
+          <input type="checkbox" className="accent-primary mt-0.5 size-4" checked={alsoNs.includes(n)} onChange={(e) => onToggle(n, e.target.checked)} />
+          <span>
+            Excluir também o namespace <b>{n}</b>: depois desta exclusão não sobra nada nele.
+          </span>
+        </label>,
+      );
+    } else {
+      boxes.push(
+        <div key={"t-" + n} className="text-muted-foreground rounded-md border px-3 py-2 text-xs">
+          O namespace <b className="text-foreground">{n}</b> continua, porque ainda está em uso por: {listText(remaining)}.
+        </div>,
+      );
+    }
+  }
+  return boxes.length ? <div className="space-y-2">{boxes}</div> : null;
+}
+
+function Alert({ children }: { children: ReactNode }) {
+  return (
+    <div className="border-destructive/40 bg-destructive/10 flex gap-2 rounded-md border px-3 py-2 text-sm">
+      <CircleAlert className="text-destructive mt-0.5 size-4 shrink-0" />
+      <span>{children}</span>
+    </div>
   );
 }
 
