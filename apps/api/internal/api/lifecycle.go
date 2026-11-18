@@ -265,7 +265,10 @@ func (s *Server) removeNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation", "o servidor não tem papel no cluster")
 		return
 	}
-	s.submitMaintenance(w, r, c, ops.KindNodeRemove, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID}, map[string]any{"server": srv.Name, "role": srv.Role})
+	// ?deleteServer=true also removes it from the inventory at the end.
+	del := r.URL.Query().Get("deleteServer") == "true"
+	s.submitMaintenance(w, r, c, ops.KindNodeRemove, ops.NodeParams{ClusterID: c.ID, ServerID: srv.ID, DeleteServer: del},
+		map[string]any{"server": srv.Name, "role": srv.Role, "deleteServer": del})
 }
 
 func nodeParam(w http.ResponseWriter, r *http.Request) (string, bool) {

@@ -309,19 +309,33 @@ function AddNodeDialog({
   );
 }
 
-function removeDescription(controlPlane: boolean, cpCount: number) {
-  if (!controlPlane) return <p>Drain → kubectl delete node → kubeadm reset no servidor. O servidor volta ao inventário como livre.</p>;
+function removeDescription(controlPlane: boolean, cpCount: number, purge: boolean, setPurge: (v: boolean) => void) {
   const left = cpCount - 1;
   return (
-    <div className="space-y-2">
-      <p>
-        Drain → proxy local dos outros nós deixa de usá-lo → kubeadm reset (sai do etcd) → conferência do membro do etcd a partir de outro control plane →
-        kubectl delete node. O servidor volta ao inventário como livre.
-      </p>
-      <p className={left === 1 || left % 2 === 0 ? "text-warning" : undefined}>
-        Restam {left} control plane(s)
-        {left === 1 ? ", sem tolerância a falhas." : left % 2 === 0 ? `: com número par o etcd tolera as mesmas falhas que com ${left - 1}.` : "."}
-      </p>
+    <div className="space-y-3">
+      {controlPlane ? (
+        <p>
+          Drain → proxy local dos outros nós deixa de usá-lo → kubeadm reset (sai do etcd) → conferência do membro do etcd a partir de outro control plane →
+          kubectl delete node.
+        </p>
+      ) : (
+        <p>Drain → kubectl delete node → kubeadm reset no servidor.</p>
+      )}
+      {controlPlane && (
+        <p className={left === 1 || left % 2 === 0 ? "text-warning" : undefined}>
+          Restam {left} control plane(s)
+          {left === 1 ? ", sem tolerância a falhas." : left % 2 === 0 ? `: com número par o etcd tolera as mesmas falhas que com ${left - 1}.` : "."}
+        </p>
+      )}
+      <label className="text-foreground flex items-start gap-2">
+        <input type="checkbox" className="mt-0.5" checked={purge} onChange={(e) => setPurge(e.target.checked)} />
+        <span>
+          Apagar também do inventário de servidores
+          <span className="text-muted-foreground block text-xs">
+            {purge ? "O servidor some de todas as listas ao fim do job." : "O servidor volta ao inventário como livre, para ser usado de novo."}
+          </span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -337,7 +351,14 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
   const cordon = useMutation({ mutationFn: (n: string) => api.cordon(id, n), onSuccess: refresh });
   const uncordon = useMutation({ mutationFn: (n: string) => api.uncordon(id, n), onSuccess: refresh });
   const drain = useMutation({ mutationFn: (n: string) => api.drain(id, n), onSuccess: setJob });
-  const remove = useMutation({ mutationFn: (sid: string) => api.removeNode(id, sid), onSuccess: setJob });
+  const [purge, setPurge] = useState(true);
+  const remove = useMutation({
+    mutationFn: (sid: string) => api.removeNode(id, sid, purge),
+    onSuccess: (j) => {
+      setJob(j);
+      qc.invalidateQueries({ queryKey: ["servers"] });
+    },
+  });
   const byIP = new Map(members.map((m) => [m.host, m]));
   const err = cordon.error ?? uncordon.error ?? drain.error ?? remove.error;
 
@@ -425,7 +446,7 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
                           variant="ghost"
                           destructive
                           title={`Remover ${n.controlPlane ? "o control plane " : ""}${n.name} do cluster?`}
-                          description={removeDescription(n.controlPlane, cpCount)}
+                          description={removeDescription(n.controlPlane, cpCount, purge, setPurge)}
                           confirmLabel="Remover"
                           onConfirm={() => remove.mutate(srv.id)}
                         >

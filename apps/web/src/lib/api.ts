@@ -776,7 +776,8 @@ export const api = {
   startUpgrade: (id: string, targetVersion: string) => request<Job>("POST", `/clusters/${id}/upgrades`, { targetVersion }),
   addNode: (id: string, serverId: string, role: "control-plane" | "worker" = "worker") =>
     request<Job>("POST", `/clusters/${id}/nodes`, { serverId, role }),
-  removeNode: (id: string, serverId: string) => request<Job>("DELETE", `/clusters/${id}/nodes/${serverId}`),
+  removeNode: (id: string, serverId: string, deleteServer = false) =>
+    request<Job>("DELETE", `/clusters/${id}/nodes/${serverId}${deleteServer ? "?deleteServer=true" : ""}`),
   cordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/cordon`),
   uncordon: (id: string, node: string) => request<void>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/uncordon`),
   drain: (id: string, node: string) => request<Job>("POST", `/clusters/${id}/k8s/nodes/${encodeURIComponent(node)}/drain`),

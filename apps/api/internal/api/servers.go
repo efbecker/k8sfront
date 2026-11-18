@@ -117,6 +117,16 @@ func (s *Server) apply(ctx context.Context, srv *store.Server, in *serverInput, 
 	default:
 		return nil, invalid("role must be control-plane, worker or empty")
 	}
+	// Names identify servers in every list and job log: keep them unique.
+	all, err := s.Store.ListServers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range all {
+		if o.ID != srv.ID && strings.EqualFold(o.Name, srv.Name) {
+			return nil, invalid("já existe um servidor chamado %q (%s); escolha outro nome ou remova o antigo do inventário", o.Name, o.Host)
+		}
+	}
 
 	replaceSecret := func(cur **string, kind store.SecretKind, value []byte) error {
 		id, err := s.Secrets.Put(ctx, kind, value)
