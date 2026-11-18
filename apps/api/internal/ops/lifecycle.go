@@ -26,10 +26,11 @@ const (
 	KindRollingReboot = "cluster.rolling-reboot"
 	KindCerts         = "cluster.certs"
 	KindHelm          = "cluster.helm"
+	KindLoadBalancer  = "cluster.loadbalancer"
 )
 
 // LifecycleKinds are the jobs listed on the Updates & Lifecycle page.
-var LifecycleKinds = []string{KindUpgrade, KindNodeAdd, KindNodeRemove, KindNodeDrain, KindOSCheck, KindOSUpdate, KindRollingReboot, KindCerts}
+var LifecycleKinds = []string{KindUpgrade, KindNodeAdd, KindNodeRemove, KindNodeDrain, KindOSCheck, KindOSUpdate, KindRollingReboot, KindCerts, KindLoadBalancer}
 
 // lifecycleRun loads a provisioned cluster for a maintenance job.
 func (o *Ops) lifecycleRun(ctx context.Context, jc *jobs.Context, clusterID string) (*bootstrapRun, *store.Cluster, error) {

@@ -31,6 +31,7 @@ const (
 	DefaultCalicoVersion    = "v3.32.3"
 	DefaultMetricsServer    = "v0.8.1"
 	DefaultKubeVIPVersion   = "v1.3.1"
+	DefaultMetalLBVersion   = "v0.15.2"
 	APIServerPort           = 6443
 	// LocalProxyPort is where the per-node API proxy listens (127.0.0.1 only).
 	// 6443 is taken by kube-apiserver on control planes.
@@ -78,6 +79,9 @@ type Options struct {
 	KubeVIP      *KubeVIP     `json:"kubeVip,omitempty"`
 	CNIVersion   string       `json:"cniVersion,omitempty"`
 	ExtraSANs    []string     `json:"extraSans,omitempty"`
+	// LoadBalancer gives Services of type LoadBalancer a real IP from a
+	// range of the node network (nil = none: they stay Pending).
+	LoadBalancer *LoadBalancer `json:"loadBalancer,omitempty"`
 }
 
 // ParseOptions decodes stored options.
@@ -268,6 +272,11 @@ func (s *Spec) Validate() error {
 		}
 		if kv.Interface != "" && !ifaceRe.MatchString(kv.Interface) {
 			return invalid("invalid network interface name %q", kv.Interface)
+		}
+	}
+	if lb := s.Options.LoadBalancer; lb != nil {
+		if err := s.validateLoadBalancer(lb); err != nil {
+			return err
 		}
 	}
 	for _, san := range s.Options.ExtraSANs {

@@ -60,4 +60,14 @@ func TestKubeEndpoints(t *testing.T) {
 	if code := call(t, ts, "GET", "/api/v1/clusters/c1/k8s/workloads", nil, &wl); code != 200 {
 		t.Fatalf("workloads: %d", code)
 	}
+	var acc kube.Access
+	if code := call(t, ts, "GET", "/api/v1/clusters/c1/k8s/access", nil, &acc); code != 200 || len(acc.Services) != 0 {
+		t.Fatalf("access (ClusterIP only): %d %+v", code, acc)
+	}
+	if code := call(t, ts, "GET", "/api/v1/clusters/c1/k8s/access/probe?namespace=default&service=kubernetes&url=http://169.254.169.254/", nil, &e); code != 400 {
+		t.Fatalf("probe of a URL that is not a Service link must be refused: %d %+v", code, e)
+	}
+	if code := call(t, ts, "POST", "/api/v1/clusters/c1/loadbalancer", map[string]any{"addresses": []string{"10.244.0.10-10.244.0.20"}}, &e); code != 400 || e.Error != "validation" {
+		t.Fatalf("loadbalancer inside the pod CIDR: %d %+v", code, e)
+	}
 }

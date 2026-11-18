@@ -21,7 +21,7 @@ var nodeNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([
 
 // exclusiveKinds may not run while another of them (or a bootstrap) is
 // pending or running on the same cluster.
-var exclusiveKinds = []string{ops.KindBootstrap, ops.KindUpgrade, ops.KindNodeAdd, ops.KindNodeRemove, ops.KindOSUpdate, ops.KindRollingReboot, ops.KindCerts, ops.KindRegistriesSync}
+var exclusiveKinds = []string{ops.KindBootstrap, ops.KindUpgrade, ops.KindNodeAdd, ops.KindNodeRemove, ops.KindOSUpdate, ops.KindRollingReboot, ops.KindCerts, ops.KindRegistriesSync, ops.KindLoadBalancer}
 
 func (s *Server) clusterBusy(ctx context.Context, clusterID string) (*store.Job, error) {
 	list, err := s.Store.ListJobs(ctx, store.JobFilter{TargetID: clusterID, Status: []store.JobStatus{store.JobPending, store.JobRunning}, Limit: 50})

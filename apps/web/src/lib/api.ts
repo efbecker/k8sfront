@@ -154,6 +154,50 @@ export interface ClusterOptions {
   kubeVip?: { address: string; interface?: string };
   cniVersion?: string;
   extraSans?: string[];
+  /** Bare-metal LoadBalancer (MetalLB L2) with a pool of the node network. */
+  loadBalancer?: LoadBalancerConfig;
+}
+
+export interface LoadBalancerConfig {
+  provider: "metallb";
+  /** IPv4 ranges ("192.168.1.200-192.168.1.220"), CIDRs or single IPs. */
+  addresses: string[];
+}
+
+export type AccessKind = "loadbalancer" | "external-ip" | "nodeport" | "ingress";
+
+export interface AccessLink {
+  url: string;
+  kind: AccessKind;
+  label: string;
+  port: number;
+  node?: string;
+}
+
+export interface ServiceAccess {
+  namespace: string;
+  name: string;
+  type: string;
+  links: AccessLink[];
+  pending?: boolean;
+  localTraffic?: boolean;
+  /** Ready backend addresses (-1 = unknown). */
+  endpoints: number;
+  ingresses?: string[];
+}
+
+export interface AccessList {
+  services: ServiceAccess[];
+  loadBalancer: { provider?: string; addresses?: string[]; installed: boolean };
+}
+
+export interface ProbeResult {
+  url: string;
+  ok: boolean;
+  status?: number;
+  latencyMs: number;
+  error?: string;
+  insecure?: boolean;
 }
 
 export interface Cluster {
@@ -760,6 +804,14 @@ export const api = {
   network: (id: string, ns?: string) =>
     request<NetworkList>("GET", `/clusters/${id}/k8s/network${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
 
+  access: (id: string, ns?: string) => request<AccessList>("GET", `/clusters/${id}/k8s/access${ns ? `?namespace=${encodeURIComponent(ns)}` : ""}`),
+  probeAccess: (id: string, namespace: string, service: string, url: string) =>
+    request<ProbeResult>(
+      "GET",
+      `/clusters/${id}/k8s/access/probe?${new URLSearchParams({ namespace, service, url }).toString()}`,
+    ),
+  setLoadBalancer: (id: string, lb: LoadBalancerConfig) => request<Job>("POST", `/clusters/${id}/loadbalancer`, lb),
+
   renderApp: (app: AppSpec) => request<{ yaml: string; objects: { kind: string; name: string; namespace?: string }[] }>("POST", "/deploy/render", app),
   deployApp: (id: string, app: AppSpec, dryRun: boolean) => request<ApplySummary>("POST", `/clusters/${id}/deploy/app`, { app, dryRun }),
   applyManifest: (id: string, manifest: string, namespace: string, dryRun: boolean) =>
@@ -810,6 +862,7 @@ export const jobKindLabel: Record<string, string> = {
   "cluster.rolling-reboot": "Rolling reboot",
   "cluster.certs": "Certificados do kubeadm",
   "cluster.helm": "Helm",
+  "cluster.loadbalancer": "LoadBalancer (MetalLB)",
   "cluster.registries-sync": "Aplicar registries",
   "cluster.image-prepull": "Pré-pull de imagens",
   "cluster.image-prune": "Limpar imagens sem uso",

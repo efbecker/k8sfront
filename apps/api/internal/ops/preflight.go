@@ -86,6 +86,7 @@ func (o *Ops) Register(e *jobs.Engine) {
 	e.Register(KindRollingReboot, o.rollingReboot)
 	e.Register(KindCerts, o.certs)
 	e.Register(KindHelm, o.helm)
+	e.Register(KindLoadBalancer, o.loadBalancer)
 	e.Register(KindRegistriesSync, o.registriesSync)
 	e.Register(KindImagePrepull, o.imagePrepull)
 	e.Register(KindImagePrune, o.imagePrune)

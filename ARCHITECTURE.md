@@ -84,6 +84,11 @@ Fase 5 adicionou `internal/upgrade` (plano de versões e pré-checagens), `inter
 Registries & Imagens adicionou `internal/registry` (presets, validação, parse de referências de imagem, `hosts.toml`,
 dockerconfigjson e teste de credenciais), `internal/kube/registries.go` (imagePullSecrets, catálogo e pré-pull) e
 `internal/ops/registries.go` (jobs `cluster.registries-sync`, `cluster.image-prepull`, `cluster.image-prune`).
+Acesso às aplicações adicionou `internal/kube/access.go` (links por Service: IP do LoadBalancer, NodePort em cada nó Ready,
+hosts de Ingress; `GET /k8s/access` e o teste rápido `GET /k8s/access/probe`, que só aceita URLs que a própria listagem gerou para
+aquele Service) e o LoadBalancer bare-metal: `Options.loadBalancer` (MetalLB em modo L2 com faixa de IPs validada contra nós, VIP e
+CIDRs), etapa `loadbalancer` no bootstrap e o job `cluster.loadbalancer` (`internal/ops/loadbalancer.go`, script `metallb.sh`) para
+clusters existentes. O L2 do próprio Cilium não é usado porque exige substituir o kube-proxy.
 
 ---
 

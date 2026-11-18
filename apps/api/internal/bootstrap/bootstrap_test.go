@@ -183,6 +183,7 @@ func TestScriptsAreValidBash(t *testing.T) {
 			{Dir: "r.example.com:5000", TOML: "server = \"https://r.example.com:5000\"\n", CA: "-----BEGIN CERTIFICATE-----\nAA\n-----END CERTIFICATE-----\n"}}),
 		"registries-empty": RegistriesScript(nil),
 		"image-prune":      ImagePruneScript(),
+		"metallb":          lbSpec().LoadBalancerScript(),
 	}
 	for name, body := range scripts {
 		cmd := exec.Command("bash", "-n")
@@ -211,6 +212,56 @@ func TestScriptsAreValidBash(t *testing.T) {
 	for _, l := range strings.Split(scripts["init"]+scripts["creds"]+scripts["join-cp"], "\n") {
 		if strings.HasPrefix(strings.TrimSpace(l), "kubeadm") && (strings.Contains(l, sec.Token) || strings.Contains(l, sec.CertificateKey)) {
 			t.Errorf("secret on a kubeadm command line: %q", l)
+		}
+	}
+}
+
+func lbSpec() *Spec {
+	s := haSpec()
+	s.Options.LoadBalancer = &LoadBalancer{Provider: LBMetalLB, Addresses: []string{"192.168.10.200-192.168.10.220", "192.168.10.240/29"}}
+	return s
+}
+
+func TestLoadBalancerValidation(t *testing.T) {
+	if err := lbSpec().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	ok := map[string]string{"192.168.1.200-192.168.1.220": "192.168.1.200-192.168.1.220", "192.168.1.200-220": "192.168.1.200-192.168.1.220",
+		"192.168.1.240/29": "192.168.1.240-192.168.1.247", "192.168.1.9": "192.168.1.9/32", " 192.168.1.241/29 ": "192.168.1.240-192.168.1.247"}
+	for in, want := range ok {
+		r, err := ParseAddrRange(in)
+		if err != nil || r.String() != want {
+			t.Errorf("ParseAddrRange(%q) = %v, %v; want %s", in, r, err, want)
+		}
+	}
+	cases := map[string][]string{
+		"node inside":  {"192.168.10.10-192.168.10.30"},
+		"vip inside":   {"192.168.10.50"},
+		"pod cidr":     {"10.244.1.0/24"},
+		"service cidr": {"10.100.0.1-10.100.0.9"},
+		"reversed":     {"192.168.10.220-192.168.10.200"},
+		"overlap":      {"192.168.10.200-192.168.10.210", "192.168.10.205/32"},
+		"too big":      {"172.16.0.0/16"},
+		"ipv6":         {"fd00::/120"},
+		"garbage":      {"192.168.10.200; reboot"},
+		"empty":        {},
+	}
+	for name, addrs := range cases {
+		s := lbSpec()
+		s.Options.LoadBalancer.Addresses = addrs
+		if err := s.Validate(); !errors.Is(err, ErrInvalidSpec) {
+			t.Errorf("%s: expected ErrInvalidSpec, got %v", name, err)
+		}
+	}
+	s := lbSpec()
+	s.Options.LoadBalancer.Provider = "cilium"
+	if err := s.Validate(); !errors.Is(err, ErrInvalidSpec) {
+		t.Errorf("unknown provider accepted: %v", err)
+	}
+	script := lbSpec().LoadBalancerScript()
+	for _, want := range []string{"  - 192.168.10.200-192.168.10.220\n  - 192.168.10.240-192.168.10.247\n---", "metallb-native.yaml", "L2Advertisement", DefaultMetalLBVersion} {
+		if !strings.Contains(script, want) {
+			t.Errorf("metallb script lacks %q", want)
 		}
 	}
 }

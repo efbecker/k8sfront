@@ -46,7 +46,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { NativeSelect } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-const lifecycleKinds = new Set(["cluster.upgrade", "cluster.node-add", "cluster.node-remove", "cluster.node-drain", "cluster.os-check", "cluster.os-update", "cluster.rolling-reboot", "cluster.certs"]);
+const lifecycleKinds = new Set(["cluster.upgrade", "cluster.node-add", "cluster.node-remove", "cluster.node-drain", "cluster.os-check", "cluster.os-update", "cluster.rolling-reboot", "cluster.certs", "cluster.loadbalancer"]);
 
 function useClusterJobs(id: string) {
   return useQuery({

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Lock, Star, Trash2 } from "lucide-react";
 import { api, type NamespaceUsage, type ObjectRef } from "@/lib/api";
@@ -8,11 +8,12 @@ import { DeleteCell, DeleteDialog } from "@/components/deploy/shared";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { age, Empty } from "@/components/cluster/k8s";
+import { LoadBalancerCard } from "@/components/cluster/Access";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type Tab = "namespaces" | "services" | "ingresses" | "pvcs" | "pvs" | "storageClasses";
+type Tab = "loadbalancer" | "namespaces" | "services" | "ingresses" | "pvcs" | "pvs" | "storageClasses";
 
 const sum = (u: NamespaceUsage, kinds: string[]) => kinds.reduce((n, k) => n + (u.counts[k] ?? 0), 0);
 
@@ -110,7 +111,8 @@ function NamespacesTab({ clusterId }: { clusterId: string }) {
 export function ClusterNetworkPage() {
   const { id = "" } = useParams();
   const [ns, setNs] = useState("");
-  const [tab, setTab] = useState<Tab>("services");
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(params.get("tab") === "loadbalancer" ? "loadbalancer" : "services");
   const [del, setDel] = useState<ObjectRef>();
   const data = useQuery({ queryKey: ["network", id, ns], queryFn: () => api.network(id, ns), refetchInterval: 15_000 });
   const d = data.data;
@@ -130,16 +132,19 @@ export function ClusterNetworkPage() {
             { id: "pvcs", label: "PVCs", count: d?.pvcs.length },
             { id: "pvs", label: "Volumes (PV)", count: d?.pvs.length },
             { id: "storageClasses", label: "StorageClasses", count: d?.storageClasses.length },
+            { id: "loadbalancer", label: "LoadBalancer" },
           ]}
         />
-        {tab !== "namespaces" && (
+        {tab !== "namespaces" && tab !== "loadbalancer" && (
           <div className="ml-auto flex items-center gap-3">
             {d && <span className="text-muted-foreground text-xs">{d.networkPolicies} NetworkPolicies</span>}
             <NamespacePicker clusterId={id} value={ns} onChange={setNs} />
           </div>
         )}
       </div>
-      {tab === "namespaces" ? (
+      {tab === "loadbalancer" ? (
+        <LoadBalancerCard clusterId={id} />
+      ) : tab === "namespaces" ? (
         <NamespacesTab clusterId={id} />
       ) : data.isLoading ? (
         <Loader2 className="text-muted-foreground animate-spin" />
@@ -174,7 +179,16 @@ export function ClusterNetworkPage() {
                           <Badge variant={s.type === "ClusterIP" ? "secondary" : "info"}>{s.type}</Badge>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{s.clusterIP || "—"}</TableCell>
-                        <TableCell className="font-mono text-xs">{s.externalIPs?.join(", ") || "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {s.externalIPs?.join(", ") ||
+                            (s.type === "LoadBalancer" ? (
+                              <Badge variant="warning" title="Nenhum provedor entregou IP: veja a aba LoadBalancer">
+                                Pending
+                              </Badge>
+                            ) : (
+                              "—"
+                            ))}
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{s.ports.join(", ") || "—"}</TableCell>
                         <TableCell className="max-w-56 font-mono text-[11px] break-all whitespace-normal">
                           {Object.entries(s.selector ?? {})

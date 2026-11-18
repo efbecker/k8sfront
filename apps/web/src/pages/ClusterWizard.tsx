@@ -66,6 +66,8 @@ export function ClusterWizardPage() {
   const [topology, setTopology] = useState<Topology>("multi-node");
   const [untaint, setUntaint] = useState(false);
   const [metrics, setMetrics] = useState(true);
+  const [lbOn, setLbOn] = useState(false);
+  const [lbRange, setLbRange] = useState("");
   const [mode, setMode] = useState<"local-proxy" | "kube-vip">("local-proxy");
   const vipOn = topology === "multi-node" && mode === "kube-vip";
   const [vip, setVip] = useState("");
@@ -119,6 +121,15 @@ export function ClusterWizardPage() {
   if (!version) errors1.push("Selecione a versão do Kubernetes.");
   if (!cidrRe.test(podCidr) || !cidrRe.test(serviceCidr)) errors1.push("CIDRs inválidos.");
   if (vipOn && !ipRe.test(vip)) errors1.push("Informe o endereço IPv4 do VIP.");
+  const lbAddresses = useMemo(
+    () =>
+      lbRange
+        .split(/[\s,;]+/)
+        .map((a) => a.trim())
+        .filter(Boolean),
+    [lbRange],
+  );
+  if (lbOn && lbAddresses.length === 0) errors1.push("Informe a faixa de IPs do LoadBalancer (ex.: 192.168.1.200-192.168.1.220).");
 
   const errors2: string[] = [];
   if (cps.length === 0) errors2.push("Selecione ao menos um Control Plane.");
@@ -144,6 +155,7 @@ export function ClusterWizardPage() {
           metricsServer: metrics,
           endpointMode: vipOn ? "kube-vip" : "local-proxy",
           kubeVip: vipOn ? { address: vip, interface: vipIface || undefined } : undefined,
+          loadBalancer: lbOn ? { provider: "metallb", addresses: lbAddresses } : undefined,
         },
         nodes: [...cps, ...workers].map((s) => ({ serverId: s.id, role: roles[s.id] as Role })),
         start: true,
@@ -172,8 +184,9 @@ export function ClusterWizardPage() {
       ],
       ["Workloads no Control Plane", topology === "single-node" || untaint ? "permitidos" : "não"],
       ["metrics-server", metrics ? "sim" : "não"],
+      ["LoadBalancer", lbOn ? `MetalLB L2: ${lbAddresses.join(", ")}` : "não (Services LoadBalancer ficam Pending; use NodePort)"],
     ],
-    [name, version, cni, topology, podCidr, serviceCidr, vipOn, vip, vipIface, cps, untaint, metrics],
+    [name, version, cni, topology, podCidr, serviceCidr, vipOn, vip, vipIface, cps, untaint, metrics, lbOn, lbAddresses],
   );
 
   return (
@@ -301,6 +314,19 @@ export function ClusterWizardPage() {
                 </>
               )}
               <Toggle checked={metrics} onChange={setMetrics} label="Instalar metrics-server" hint="Habilita kubectl top e métricas de CPU/RAM na Dashboard." />
+              <Toggle
+                checked={lbOn}
+                onChange={setLbOn}
+                label="LoadBalancer para Services (MetalLB, modo L2)"
+                hint="Sem isso, Services do tipo LoadBalancer ficam com IP externo Pending em servidores próprios. Funciona com Cilium e Calico; dá para ativar depois em Rede & Storage."
+              />
+              {lbOn && (
+                <div className="space-y-1.5 pl-7">
+                  <Label>Faixa de IPs livres da rede dos nós</Label>
+                  <Input value={lbRange} onChange={(e) => setLbRange(e.target.value)} placeholder="192.168.1.200-192.168.1.220" className="font-mono" />
+                  <p className="text-muted-foreground text-xs">Faixas (início-fim), CIDRs ou IPs separados por vírgula, fora do DHCP e sem uso por outras máquinas.</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -421,6 +447,7 @@ export function ClusterWizardPage() {
                 {workers.length > 0 && <li>Join dos Workers {workers.map((s) => s.name).join(", ")}.</li>}
                 {(topology === "single-node" || untaint) && <li>Remover taint do Control Plane.</li>}
                 {metrics && <li>metrics-server.</li>}
+                {lbOn && <li>MetalLB (L2) com a faixa {lbAddresses.join(", ")}.</li>}
                 <li>Aguardar todos os nós em Ready.</li>
               </ol>
             </CardContent>

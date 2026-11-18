@@ -7,6 +7,7 @@ import { formatDate } from "@/lib/utils";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { Empty } from "@/components/cluster/k8s";
+import { AccessPanel } from "@/components/cluster/Access";
 import { ApplyResults, ConfirmButton, DeleteDialog, ErrorText, Field, JobLink, YamlEditor } from "@/components/deploy/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -365,8 +366,24 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
             </CardContent>
           </Card>
         )}
+        {result && <AppliedAccess clusterId={clusterId} summary={result} />}
       </div>
     </div>
+  );
+}
+
+/** After a real apply: how to reach the Services it created. */
+function AppliedAccess({ clusterId, summary }: { clusterId: string; summary: ApplySummary }) {
+  if (summary.dryRun) return null;
+  const services = summary.results.filter((r) => r.kind === "Service" && r.action !== "error").map((r) => ({ namespace: r.namespace, name: r.name }));
+  if (services.length === 0) return null;
+  return (
+    <AccessPanel
+      clusterId={clusterId}
+      only={services}
+      title="Acesso à aplicação"
+      emptyText="Os Services aplicados são internos (ClusterIP): só respondem de dentro do cluster. Para acessar de fora, use type NodePort ou LoadBalancer, ou um Ingress."
+    />
   );
 }
 
@@ -439,6 +456,7 @@ function YamlTab({ clusterId, text, setText }: { clusterId: string; text: string
           </CardContent>
         </Card>
       )}
+      {result && <AppliedAccess clusterId={clusterId} summary={result} />}
     </div>
   );
 }

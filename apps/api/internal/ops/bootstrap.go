@@ -228,6 +228,18 @@ func (o *Ops) bootstrap(ctx context.Context, jc *jobs.Context) (err error) {
 		}
 	}
 
+	if spec.Options.LoadBalancer != nil {
+		lctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+		err := b.nodeStep(lctx, primary, "loadbalancer", "LoadBalancer MetalLB "+bootstrap.DefaultMetalLBVersion, spec.LoadBalancerScript)
+		cancel()
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return fmt.Errorf("MetalLB: tempo esgotado após 20m: %w", err)
+			}
+			return err
+		}
+	}
+
 	// 7. Wait until every node reports Ready.
 	var nodes []NodeStatus
 	want := len(spec.ControlPlanes) + len(spec.Workers)

@@ -7,12 +7,13 @@ import { DeleteCell, DeleteDialog } from "@/components/deploy/shared";
 import { ClusterHeader, KubeError } from "@/components/cluster/ClusterHeader";
 import { NamespacePicker, Tabs } from "@/components/cluster/NamespacePicker";
 import { age, Empty, PodBadge } from "@/components/cluster/k8s";
+import { AccessPanel } from "@/components/cluster/Access";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type Tab = "Deployment" | "StatefulSet" | "DaemonSet" | "Pod";
+type Tab = "Deployment" | "StatefulSet" | "DaemonSet" | "Pod" | "Access";
 
 function ReadyBadge({ w }: { w: K8sWorkload }) {
   const ok = w.ready >= w.desired;
@@ -66,7 +67,7 @@ export function ClusterWorkloadsPage() {
   const filter = (name: string) => !q || name.toLowerCase().includes(q.toLowerCase());
   const wl = (data.data?.workloads ?? []).filter((w) => w.kind === tab && filter(w.name));
   const pods = (data.data?.pods ?? []).filter((p) => filter(p.name));
-  const count = (k: Tab) => (k === "Pod" ? data.data?.pods.length : data.data?.workloads.filter((w) => w.kind === k).length);
+  const count = (k: Tab) => (k === "Access" ? undefined : k === "Pod" ? data.data?.pods.length : data.data?.workloads.filter((w) => w.kind === k).length);
 
   return (
     <>
@@ -75,14 +76,19 @@ export function ClusterWorkloadsPage() {
         <Tabs
           value={tab}
           onChange={setTab}
-          items={(["Deployment", "StatefulSet", "DaemonSet", "Pod"] as Tab[]).map((k) => ({ id: k, label: k === "Pod" ? "Pods" : `${k}s`, count: count(k) }))}
+          items={[
+            ...(["Deployment", "StatefulSet", "DaemonSet", "Pod"] as Tab[]).map((k) => ({ id: k, label: k === "Pod" ? "Pods" : `${k}s`, count: count(k) })),
+            { id: "Access" as Tab, label: "Acesso" },
+          ]}
         />
         <div className="ml-auto flex flex-wrap gap-2">
-          <Input className="h-9 w-52" placeholder="Filtrar por nome" value={q} onChange={(e) => setQ(e.target.value)} />
+          {tab !== "Access" && <Input className="h-9 w-52" placeholder="Filtrar por nome" value={q} onChange={(e) => setQ(e.target.value)} />}
           <NamespacePicker clusterId={id} value={ns} onChange={setNs} />
         </div>
       </div>
-      {data.isLoading ? (
+      {tab === "Access" ? (
+        <AccessPanel clusterId={id} namespace={ns} />
+      ) : data.isLoading ? (
         <Loader2 className="text-muted-foreground animate-spin" />
       ) : data.error ? (
         <KubeError error={data.error} />
