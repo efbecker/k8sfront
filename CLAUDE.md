@@ -27,12 +27,12 @@ apps/web   Frontend React + TypeScript + Vite + Tailwind v4 + componentes estilo
 | Tarballs de release + SHA256SUMS em `dist/` | `make dist VERSION=vX.Y.Z` |
 
 Instalação em servidor: `install.sh` (curl | sudo bash; release com sha256 ou build do fonte, serviço systemd). Teste mudanças nele num container `debian:trixie`.
-Login local: o token de admin vem de `K8SFRONT_ADMIN_TOKEN` ou é gerado em `data/admin.token` na primeira execução.
+Login local: o token de admin vem de `K8SFRONT_ADMIN_TOKEN` ou é gerado em `data/admin.token` na primeira execução (acesso de emergência; usuários e LDAP/AD ficam em **Usuários e acesso**).
 Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.go`.
 
 ## Convenções Go (`apps/api`)
 
-- Go 1.26, apenas stdlib + dependências já presentes (`x/crypto/ssh`, `modernc.org/sqlite`, `coder/websocket`, `google/uuid`, `k8s.io/client-go` em `internal/kube`). Sem CGO.
+- Go 1.26, apenas stdlib + dependências já presentes (`x/crypto/ssh` e `x/crypto/argon2`, `modernc.org/sqlite`, `coder/websocket`, `google/uuid`, `k8s.io/client-go` em `internal/kube`). Sem CGO.
 - Roteamento com `net/http.ServeMux` (padrões `"GET /api/v1/x/{id}"`). Logs estruturados com `log/slog`.
 - Persistência só através da interface `store.Store`. SQL específico de SQLite fica em `internal/store/sqlite`; nada fora desse pacote importa o driver. Novas tabelas = novo arquivo `migrations/NNNN_nome.sql` (nunca edite uma migration já publicada).
 - Operações longas são **jobs** (`internal/jobs`), nunca trabalho dentro do handler HTTP. Handlers de job ficam em `internal/ops`, são idempotentes e usam `jc.StepOnce` para etapas que não devem repetir num retry.
@@ -40,6 +40,8 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 - Scripts de bootstrap ficam em `internal/bootstrap/scripts/*.sh` (text/template com delimitadores `<% %>`, use `q` para quoting). Todo script novo precisa passar no `bash -n` do teste e não pode conter `apt-key` nem segredos em linha de comando; segredos de kubeadm entram por process substitution.
 - Registries de imagens: lógica pura em `internal/registry`; configuração dos nós só via `certs.d/<host>/hosts.toml` (script `registries.sh`) e credenciais só como imagePullSecrets (nunca em comandos nos nós).
 - Versões de componentes (Cilium, Calico, kube-vip, metrics-server) são fixadas em `internal/bootstrap/spec.go`; atualize lá e rode `K8SFRONT_KUBEADM=/caminho/kubeadm go test ./internal/bootstrap/` quando mexer nas configs do kubeadm.
+- Papéis (`viewer` < `operator` < `admin`): rota nova com `priv` já exige viewer em GET e operator no resto; use `opr`/`adm` em `api.Handler` para subir o mínimo. No frontend, botão de ação leva `requires="operator"` (ou `admin`) e `ConfirmButton` já assume operator. Nunca deixe o sistema sem admin local (o store recusa com `ErrLastAdmin`).
+- LDAP/AD só por `internal/ldap` (cliente próprio, stdlib). Valores vindos do usuário entram em filtros sempre com `EscapeFilter`; senha vazia nunca vai para um bind.
 - `gofmt` obrigatório; testes ao lado do código (`*_test.go`), integração com build tag `integration` em `test/integration`.
 
 ## Convenções Web (`apps/web`)
@@ -55,7 +57,7 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 2. **Senha do sudo só via stdin.** Use `sshx.Client.Run(..., RunOptions{Sudo: true})`. Ele executa `sudo -k -S -p '' -- /bin/bash -c '<wrapper fixo>'` e envia a senha e depois o script pelo stdin. Nunca coloque senhas, tokens ou chaves em argv, variáveis de ambiente da linha de comando, arquivos temporários em texto puro ou no script de forma literal.
 3. **Scripts remotos** vão pelo stdin e são embrulhados em função (`BuildScript`): `HISTFILE=/dev/null`, `DEBIAN_FRONTEND=noninteractive`, `LC_ALL=C.UTF-8`; comandos dentro do script não conseguem ler o restante do stdin.
 4. **Redação de segredos.** Toda saída remota passa por `redact.LineWriter` com os segredos da conexão registrados. Ao introduzir um novo tipo de segredo (ex.: token de join, certificate-key), registre-o no `Redactor` da sessão e/ou adicione um padrão em `internal/redact`.
-5. **Credenciais em repouso** só cifradas pelo `secrets.Manager` (AES-256-GCM, AAD `k8sfront:secret:<id>:<kind>`). A API nunca devolve segredos, apenas flags `has*`.
+5. **Credenciais em repouso** só cifradas pelo `secrets.Manager` (AES-256-GCM, AAD `k8sfront:secret:<id>:<kind>`). A API nunca devolve segredos, apenas flags `has*`. Senhas de usuários locais só como hash argon2id (`internal/passwd`).
 6. **Host keys** são registradas no primeiro contato (TOFU) e verificadas sempre; divergência aborta com `HostKeyMismatchError`. Reset só por ação explícita do operador (auditada).
 7. **APT no Debian 13+:** sempre `DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"`, repositórios em formato moderno com chave em `/etc/apt/keyrings/` (`signed-by=`). **Nunca** `apt-key`.
 8. **Kubernetes:** `kubelet`, `kubeadm`, `kubectl` ficam em `apt-mark hold`; só o motor de upgrade faz `unhold` → instala versão exata → `hold` de novo. Nunca pular minor versions (version skew policy).

@@ -579,6 +579,100 @@ export interface PruneNode {
   error?: string;
 }
 
+// --- Users & access ------------------------------------------------------------------
+
+export type Role = "admin" | "operator" | "viewer";
+export type UserSource = "local" | "ldap" | "token";
+
+export const roleRank: Record<Role, number> = { viewer: 1, operator: 2, admin: 3 };
+export const roleLabel: Record<Role, string> = { admin: "Administrador", operator: "Operador", viewer: "Leitura" };
+
+export interface Me {
+  id: string;
+  user: string;
+  username: string;
+  displayName: string;
+  role: Role;
+  source: UserSource;
+  version: string;
+}
+
+export interface AuthProviders {
+  users: boolean;
+  ldap: boolean;
+  ldapKind: "ad" | "ldap";
+}
+
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  source: "local" | "ldap";
+  role: Role;
+  disabled: boolean;
+  externalDn?: string;
+  groups: string[];
+  lastLoginAt: string | null;
+  hasPassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserInput {
+  username?: string;
+  displayName?: string;
+  email?: string;
+  role?: Role;
+  password?: string;
+  disabled?: boolean;
+}
+
+export type LdapKind = "ad" | "ldap";
+export type LdapSecurity = "ldaps" | "starttls" | "none";
+
+export interface GroupMapping {
+  group: string;
+  role: Role;
+}
+
+export interface LdapConfig {
+  enabled: boolean;
+  kind: LdapKind;
+  host: string;
+  port: number;
+  security: LdapSecurity;
+  skipVerify: boolean;
+  caCert: string;
+  bindDn: string;
+  baseDn: string;
+  userFilter: string;
+  usernameAttr: string;
+  displayNameAttr: string;
+  emailAttr: string;
+  groupBaseDn: string;
+  groupFilter: string;
+  groupMappings: GroupMapping[];
+  defaultRole: "" | Role;
+  timeoutSeconds: number;
+}
+
+export interface LdapView extends LdapConfig {
+  hasBindPassword: boolean;
+  defaults: Record<LdapKind, Partial<LdapConfig>>;
+}
+
+export interface LdapInput extends LdapConfig {
+  bindPassword?: string;
+  clearBindPassword?: boolean;
+}
+
+export interface LdapReport {
+  ok: boolean;
+  steps: { name: string; ok: boolean; detail: string }[];
+  identity?: { username: string; dn: string; displayName: string; email: string; groups: string[]; role: "" | Role };
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -608,9 +702,19 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  login: (token: string) => request<{ user: string }>("POST", "/auth/login", { token }),
+  login: (creds: { token: string } | { username: string; password: string }) => request<Me>("POST", "/auth/login", creds),
   logout: () => request<void>("POST", "/auth/logout"),
-  me: () => request<{ user: string; version: string }>("GET", "/auth/me"),
+  me: () => request<Me>("GET", "/auth/me"),
+  authProviders: () => request<AuthProviders>("GET", "/auth/providers"),
+  changePassword: (currentPassword: string, newPassword: string) => request<void>("POST", "/auth/password", { currentPassword, newPassword }),
+
+  users: () => request<User[]>("GET", "/users"),
+  createUser: (input: UserInput) => request<User>("POST", "/users", input),
+  updateUser: (id: string, input: UserInput) => request<User>("PATCH", `/users/${id}`, input),
+  deleteUser: (id: string) => request<void>("DELETE", `/users/${id}`),
+  ldap: () => request<LdapView>("GET", "/auth/ldap"),
+  saveLdap: (input: LdapInput) => request<LdapView>("PUT", "/auth/ldap", input),
+  testLdap: (input: LdapInput & { username?: string; password?: string }) => request<LdapReport>("POST", "/auth/ldap/test", input),
 
   servers: () => request<Server[]>("GET", "/servers"),
   server: (id: string) => request<Server>("GET", `/servers/${id}`),

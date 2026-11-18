@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -51,9 +52,68 @@ const (
 	SecretSSHPassword   SecretKind = "ssh_password"
 	SecretSudoPassword  SecretKind = "sudo_password"
 	SecretKubeconfig    SecretKind = "kubeconfig"
-	SecretHelmValues    SecretKind = "helm_values"       // values of a pending Helm job (deleted when it succeeds)
-	SecretRegistryAuth  SecretKind = "registry_password" // password or token of a container registry
+	SecretHelmValues    SecretKind = "helm_values"        // values of a pending Helm job (deleted when it succeeds)
+	SecretRegistryAuth  SecretKind = "registry_password"  // password or token of a container registry
+	SecretLDAPBind      SecretKind = "ldap_bind_password" // password of the LDAP/AD service account
 )
+
+// Role is what a user may do in the platform. Higher roles include lower ones.
+type Role string
+
+const (
+	RoleViewer   Role = "viewer"   // read-only
+	RoleOperator Role = "operator" // every operation except managing users and authentication
+	RoleAdmin    Role = "admin"    // everything
+)
+
+// Rank orders roles; unknown roles rank 0 (no access).
+func (r Role) Rank() int {
+	switch r {
+	case RoleViewer:
+		return 1
+	case RoleOperator:
+		return 2
+	case RoleAdmin:
+		return 3
+	}
+	return 0
+}
+
+// Valid reports whether r is a known role.
+func (r Role) Valid() bool { return r.Rank() > 0 }
+
+// User sources.
+const (
+	UserLocal = "local" // password hash kept by the platform
+	UserLDAP  = "ldap"  // authenticated by LDAP/Active Directory, role synced from groups at login
+)
+
+// ErrLastAdmin is returned when a change would leave no enabled local admin.
+var ErrLastAdmin = fmt.Errorf("%w: é preciso manter ao menos um administrador local ativo", ErrConflict)
+
+// User is a person who can sign in. PasswordHash is an argon2id PHC string
+// (local users only) and never leaves the API.
+type User struct {
+	ID           string     `json:"id"`
+	Username     string     `json:"username"`
+	DisplayName  string     `json:"displayName"`
+	Email        string     `json:"email"`
+	Source       string     `json:"source"`
+	Role         Role       `json:"role"`
+	PasswordHash string     `json:"-"`
+	Disabled     bool       `json:"disabled"`
+	ExternalDN   string     `json:"externalDn,omitempty"`
+	Groups       []string   `json:"groups"`
+	SessionEpoch int64      `json:"-"` // bumped to revoke every session of the user
+	LastLoginAt  *time.Time `json:"lastLoginAt"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+// IsLocalAdmin reports whether the user counts toward the last-admin guard.
+func (u *User) IsLocalAdmin() bool {
+	return u.Source == UserLocal && u.Role == RoleAdmin && !u.Disabled
+}
 
 // Secret is an encrypted blob. Plaintext never lives in this struct.
 type Secret struct {
@@ -308,6 +368,20 @@ type Store interface {
 	AppendLogs(ctx context.Context, lines []LogLine) error
 	ListLogs(ctx context.Context, jobID string, afterSeq int64, limit int) ([]LogLine, error)
 	MaxLogSeq(ctx context.Context, jobID string) (int64, error)
+
+	// Users. UpdateUser and DeleteUser fail with ErrLastAdmin (atomically) when
+	// the change would leave no enabled local admin while one existed before.
+	CreateUser(ctx context.Context, u *User) error
+	UpdateUser(ctx context.Context, u *User) error
+	GetUser(ctx context.Context, id string) (*User, error)
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	DeleteUser(ctx context.Context, id string) error
+	CountUsers(ctx context.Context) (int, error)
+
+	// Settings are small JSON documents keyed by name (e.g. "ldap").
+	GetSetting(ctx context.Context, key string) (json.RawMessage, error)
+	PutSetting(ctx context.Context, key string, value json.RawMessage) error
 
 	AppendAudit(ctx context.Context, e *AuditEntry) error
 	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)

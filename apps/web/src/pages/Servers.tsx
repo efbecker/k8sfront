@@ -40,11 +40,11 @@ export function ServersPage() {
         description="Inventário de nós Debian 13+ gerenciados via SSH."
         actions={
           <>
-            <Button variant="outline" disabled={selected.size === 0 || test.isPending} onClick={() => test.mutate([...selected])}>
+            <Button requires="operator" variant="outline" disabled={selected.size === 0 || test.isPending} onClick={() => test.mutate([...selected])}>
               {test.isPending ? <Loader2 className="animate-spin" /> : <Stethoscope />}
               Testar Conexão & Pré-requisitos{selected.size > 0 ? ` (${selected.size})` : ""}
             </Button>
-            <Button onClick={() => setAdding(true)}>
+            <Button requires="operator" onClick={() => setAdding(true)}>
               <Plus /> Adicionar servidor
             </Button>
           </>
@@ -65,7 +65,7 @@ export function ServersPage() {
                 Cadastre os nós Debian 13 (Trixie) ou superior que formarão o cluster. A plataforma valida SSH, sudo, versão do Debian e
                 pré-requisitos antes de qualquer operação.
               </p>
-              <Button onClick={() => setAdding(true)}>
+              <Button requires="operator" onClick={() => setAdding(true)}>
                 <Plus /> Adicionar servidor
               </Button>
             </div>
@@ -119,10 +119,10 @@ export function ServersPage() {
                       <div className="text-muted-foreground mt-0.5 text-xs">{formatDate(s.lastCheckAt)}</div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate([s.id])}>
+                      <Button requires="operator" size="sm" variant="outline" disabled={test.isPending} onClick={() => test.mutate([s.id])}>
                         <Stethoscope /> Testar
                       </Button>
-                      <Button size="icon" variant="ghost" className="ml-1 size-8" title={`Remover ${s.name}`} onClick={() => setRemoving(s)}>
+                      <Button requires="operator" size="icon" variant="ghost" className="ml-1 size-8" title={`Remover ${s.name}`} onClick={() => setRemoving(s)}>
                         <Trash2 className="text-destructive" />
                       </Button>
                     </TableCell>

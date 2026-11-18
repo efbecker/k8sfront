@@ -23,6 +23,7 @@ import { ClusterDeployPage } from "@/pages/ClusterDeploy";
 import { ClusterLifecyclePage } from "@/pages/ClusterLifecycle";
 import { ClusterImagesPage } from "@/pages/ClusterImages";
 import { RegistriesPage } from "@/pages/Registries";
+import { UsersPage } from "@/pages/Users";
 import { ActiveClusterRedirect } from "@/components/layout/AppShell";
 import "./index.css";
 
@@ -81,6 +82,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/jobs/:id" element={<JobDetailPage />} />
                 <Route path="/audit" element={<AuditPage />} />
+                <Route path="/users" element={<UsersPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>

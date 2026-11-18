@@ -96,7 +96,7 @@ então uma implementação PostgreSQL só precisa satisfazer a interface e porta
 
 Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e registradas em `schema_migrations`.
 
-### Tabelas (0001_init.sql + 0002_cluster_options.sql + 0003_registries.sql)
+### Tabelas (0001_init.sql + 0002_cluster_options.sql + 0003_registries.sql + 0004_users.sql)
 
 | Tabela | Finalidade | Colunas principais |
 | --- | --- | --- |
@@ -109,6 +109,9 @@ Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e 
 | `job_logs` | saída redigida | PK `(job_id, seq)`, `ts`, `stream` (stdout/stderr/system), `step_id`, `server_id`, `line` |
 | `audit_log` | trilha de auditoria | `ts`, `actor`, `action`, `target_type`, `target_id`, `details` (JSON sem segredos), `remote_addr` |
 | `registries` | registries de imagens e mirrors | `name`, `kind` (dockerhub/ghcr/quay/harbor/generic), `host` (UNIQUE, como aparece nas imagens), `endpoint`, `mirrors` (JSON), `username`, `password_secret_id` (`registry_password` no cofre), `ca_cert` (PEM público), `skip_verify`, `pull_secret`, `namespaces` (JSON, vazio = todos menos os de sistema), `cluster_ids` (JSON, vazio = todos) |
+
+| `users` | contas do k8sfront | `username` (UNIQUE, sem diferenciar maiúsculas), `display_name`, `email`, `source` (local/ldap), `role` (admin/operator/viewer), `password_hash` (argon2id, só locais), `disabled`, `external_dn`, `groups` (JSON, último login LDAP), `session_epoch`, `last_login_at` |
+| `settings` | documentos JSON pequenos | `key` (ex.: `ldap`), `value`, `updated_at` |
 
 Ao remover um servidor, seus segredos são apagados na mesma transação.
 
@@ -211,11 +214,38 @@ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.
 Base `/api/v1`. JSON em todas as requisições com corpo (`Content-Type: application/json` obrigatório em métodos
 de escrita; defesa extra contra CSRF). Erros: `{"error": "<código>", "message": "..."}`.
 
-### Autenticação
-Admin único: `K8SFRONT_ADMIN_TOKEN` (≥ 16 caracteres) ou token gerado em `data/admin.token`.
-`POST /auth/login` emite cookie `k8sfront_session` (HttpOnly, SameSite=Strict, `Secure` com
-`K8SFRONT_SECURE_COOKIES=true`, assinado com HMAC, expira em `K8SFRONT_SESSION_TTL`).
-Automação pode usar `Authorization: Bearer <token>`. (RBAC multiusuário: fora do escopo atual.)
+### Autenticação e papéis
+- **Usuários locais** (`users`, senha em hash argon2id PHC, mínimo 10 caracteres) e **LDAP / Active Directory**
+  (`internal/ldap`: cliente LDAPv3 próprio sobre a stdlib com bind simples, busca, LDAPS e StartTLS). O login tenta a conta
+  local primeiro; uma conta local sempre vence uma do diretório com o mesmo nome.
+- **LDAP/AD:** bind com a conta de serviço → busca o usuário pelo filtro (`{username}` com escape RFC 4515) → lê os grupos
+  (`memberOf` + busca de grupos com `{dn}`; no AD a regra `1.2.840.113556.1.4.1941` resolve grupos aninhados) → bind como o
+  usuário (senha vazia é recusada antes de ir ao servidor). O papel é o maior entre os grupos mapeados (nome/CN ou DN) e é
+  recalculado a cada login; sem grupo mapeado e sem papel padrão, o login é negado. A configuração fica em `settings`
+  (`ldap`) e a senha da conta de serviço no cofre (`ldap_bind_password`).
+- **Papéis:** `viewer` (leitura), `operator` (tudo menos usuários e autenticação) e `admin`. Em `api.Handler`, `priv`
+  exige `viewer` para GET e `operator` para o resto; `opr`/`adm` sobem o mínimo (kubeconfig e auditoria = operator;
+  `/users` e `/auth/ldap*` = admin). O papel é lido do banco a cada requisição.
+- **Último admin:** `UpdateUser`/`DeleteUser` rodam numa transação que é desfeita (`ErrLastAdmin`, 409) se a mudança
+  levar de ≥ 1 para 0 administradores locais ativos. Ninguém muda o próprio papel, se desativa ou se exclui.
+- **Sessão:** cookie `k8sfront_session` (HttpOnly, SameSite=Strict, `Secure` com `K8SFRONT_SECURE_COOKIES=true`, HMAC,
+  expira em `K8SFRONT_SESSION_TTL`) com `exp | nonce | session_epoch | user id`. Desativar o usuário ou trocar a senha
+  incrementa `session_epoch` e derruba as sessões abertas.
+- **Token de administrador** (`K8SFRONT_ADMIN_TOKEN` ≥ 16 caracteres ou `data/admin.token`): acesso de emergência como
+  admin, no login ou em `Authorization: Bearer <token>` para automação. Aparece na auditoria como `admin (token)`.
+- Auditoria: `auth.login`, `auth.login_failed` (com o motivo), `auth.password_change`, `user.create|update|delete`,
+  `auth.ldap_update`, `auth.ldap_test`; `actor` é o usuário da sessão e jobs gravam `createdBy` com ele.
+
+| Método | Rota | Papel | Descrição |
+| --- | --- | --- | --- |
+| GET | `/auth/providers` | público | `{users, ldap, ldapKind}` para a tela de login |
+| POST | `/auth/login` | público | `{username, password}` ou `{token}` |
+| GET | `/auth/me` | viewer | usuário, papel e origem da sessão |
+| POST | `/auth/password` | viewer | troca da própria senha (contas locais) |
+| GET · POST | `/users` | admin | listar · criar usuário local (resposta só com `hasPassword`) |
+| PATCH · DELETE | `/users/{id}` | admin | nome, e-mail, papel, senha, desativar · excluir |
+| GET · PUT | `/auth/ldap` | admin | configuração (só `hasBindPassword`, nunca a senha) |
+| POST | `/auth/ldap/test` | admin | testa o formulário sem salvar; com usuário/senha mostra grupos e papel |
 
 ### Endpoints (Fase 1)
 

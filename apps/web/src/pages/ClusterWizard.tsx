@@ -316,10 +316,10 @@ export function ClusterWizardPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => setAdding(true)}>
+              <Button requires="operator" variant="outline" onClick={() => setAdding(true)}>
                 <Plus /> Adicionar servidor
               </Button>
-              <Button variant="outline" disabled={selected.length === 0 || testing || test.isPending} onClick={() => test.mutate()}>
+              <Button requires="operator" variant="outline" disabled={selected.length === 0 || testing || test.isPending} onClick={() => test.mutate()}>
                 {testing || test.isPending ? <Loader2 className="animate-spin" /> : <Stethoscope />}
                 Testar Conexão & Pré-requisitos ({selected.length})
               </Button>
@@ -353,7 +353,7 @@ export function ClusterWizardPage() {
                       {topology === "multi-node" && <option value="worker">Worker</option>}
                     </NativeSelect>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" title="Editar servidor" aria-label={`Editar ${s.name}`} onClick={() => setEditing(s)}>
+                      <Button requires="operator" variant="ghost" size="icon" title="Editar servidor" aria-label={`Editar ${s.name}`} onClick={() => setEditing(s)}>
                         <Pencil />
                       </Button>
                       <Button
@@ -451,7 +451,7 @@ export function ClusterWizardPage() {
             Próximo <ChevronRight />
           </Button>
         ) : (
-          <Button disabled={create.isPending} onClick={() => create.mutate()}>
+          <Button requires="operator" disabled={create.isPending} onClick={() => create.mutate()}>
             {create.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
             Criar cluster e iniciar deploy
           </Button>
@@ -479,7 +479,7 @@ export function ClusterWizardPage() {
             <Button variant="outline" disabled={remove.isPending} onClick={() => setRemoving(undefined)}>
               Cancelar
             </Button>
-            <Button variant="destructive" disabled={remove.isPending} onClick={() => removing && remove.mutate(removing)}>
+            <Button requires="operator" variant="destructive" disabled={remove.isPending} onClick={() => removing && remove.mutate(removing)}>
               {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
               Excluir
             </Button>

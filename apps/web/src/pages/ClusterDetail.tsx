@@ -79,7 +79,7 @@ export function ClusterDetailPage() {
               </>
             )}
             {(c.status === "draft" || c.status === "failed") && !running && (
-              <Button
+              <Button requires="operator"
                 variant="outline"
                 className="text-destructive"
                 onClick={() =>
@@ -90,7 +90,7 @@ export function ClusterDetailPage() {
               </Button>
             )}
             {!running && c.status !== "ready" && (
-              <Button disabled={start.isPending} onClick={() => start.mutate()}>
+              <Button requires="operator" disabled={start.isPending} onClick={() => start.mutate()}>
                 {resumable ? <RotateCw /> : <Play />}
                 {resumable ? "Retomar deploy" : "Iniciar deploy"}
               </Button>

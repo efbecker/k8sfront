@@ -214,7 +214,7 @@ func (s *Server) startBootstrap(r *http.Request, clusterID string) (*store.Job, 
 			return s.Store.GetJob(ctx, last.ID)
 		}
 	}
-	job, err := s.Engine.Submit(ctx, ops.KindBootstrap, "cluster", clusterID, ops.BootstrapParams{ClusterID: clusterID}, "admin")
+	job, err := s.Engine.Submit(ctx, ops.KindBootstrap, "cluster", clusterID, ops.BootstrapParams{ClusterID: clusterID}, actor(r))
 	if err != nil {
 		return nil, err
 	}

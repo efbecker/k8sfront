@@ -7,14 +7,16 @@ import { PageHeader } from "@/components/layout/AppShell";
 import { ClusterStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Can, useCan } from "@/components/permissions";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 /** Landing route: the wizard when no cluster exists yet, otherwise the cluster list. */
 export function HomeRedirect() {
   const clusters = useQuery({ queryKey: ["clusters"], queryFn: api.clusters });
+  const canCreate = useCan("operator");
   if (clusters.isLoading) return <Loader2 className="text-muted-foreground animate-spin" />;
-  return <Navigate to={(clusters.data ?? []).length === 0 ? "/clusters/new" : "/clusters"} replace />;
+  return <Navigate to={(clusters.data ?? []).length === 0 && canCreate ? "/clusters/new" : "/clusters"} replace />;
 }
 
 export function ClustersPage() {
@@ -26,11 +28,13 @@ export function ClustersPage() {
         title="Clusters"
         description="Clusters Kubernetes provisionados com kubeadm sobre Debian 13+."
         actions={
-          <Button asChild>
-            <Link to="/clusters/new">
-              <Plus /> Novo cluster
-            </Link>
-          </Button>
+          <Can min="operator">
+            <Button asChild>
+              <Link to="/clusters/new">
+                <Plus /> Novo cluster
+              </Link>
+            </Button>
+          </Can>
         }
       />
       <Card className="py-0">
@@ -41,11 +45,13 @@ export function ClustersPage() {
             <div className="flex flex-col items-center gap-3 p-12 text-center">
               <Boxes className="text-muted-foreground size-10" />
               <div className="font-medium">Nenhum cluster ainda</div>
-              <Button asChild>
-                <Link to="/clusters/new">
-                  <Rocket /> Abrir o Wizard de Deploy
-                </Link>
-              </Button>
+              <Can min="operator" fallback={<p className="text-muted-foreground text-sm">Peça a um operador ou administrador para provisionar o primeiro cluster.</p>}>
+                <Button asChild>
+                  <Link to="/clusters/new">
+                    <Rocket /> Abrir o Wizard de Deploy
+                  </Link>
+                </Button>
+              </Can>
             </div>
           ) : (
             <Table>

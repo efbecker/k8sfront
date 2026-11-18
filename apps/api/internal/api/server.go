@@ -42,12 +42,34 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	pub := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) }
-	priv := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireAuth(h)) }
+	// priv: reads need at least the viewer role, anything that changes state
+	// needs operator. opr/adm raise the minimum for sensitive routes.
+	priv := func(pattern string, h http.HandlerFunc) {
+		min := store.RoleOperator
+		if strings.HasPrefix(pattern, "GET ") {
+			min = store.RoleViewer
+		}
+		mux.Handle(pattern, s.require(min, h))
+	}
+	opr := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.require(store.RoleOperator, h)) }
+	adm := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.require(store.RoleAdmin, h)) }
+	self := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.require(store.RoleViewer, h)) }
 
 	pub("GET /api/v1/health", s.health)
+	pub("GET /api/v1/auth/providers", s.authProviders)
 	pub("POST /api/v1/auth/login", s.login)
 	pub("POST /api/v1/auth/logout", s.logout)
-	priv("GET /api/v1/auth/me", s.me)
+	self("GET /api/v1/auth/me", s.me)
+	self("POST /api/v1/auth/password", s.changeOwnPassword)
+
+	// Users and authentication (admin only).
+	adm("GET /api/v1/users", s.listUsers)
+	adm("POST /api/v1/users", s.createUser)
+	adm("PATCH /api/v1/users/{id}", s.updateUser)
+	adm("DELETE /api/v1/users/{id}", s.deleteUser)
+	adm("GET /api/v1/auth/ldap", s.getLDAP)
+	adm("PUT /api/v1/auth/ldap", s.putLDAP)
+	adm("POST /api/v1/auth/ldap/test", s.testLDAP)
 
 	priv("GET /api/v1/servers", s.listServers)
 	priv("POST /api/v1/servers", s.createServer)
@@ -74,7 +96,7 @@ func (s *Server) Handler() http.Handler {
 	priv("GET /api/v1/clusters/{id}", s.getCluster)
 	priv("DELETE /api/v1/clusters/{id}", s.deleteCluster)
 	priv("POST /api/v1/clusters/{id}/bootstrap", s.bootstrapCluster)
-	priv("GET /api/v1/clusters/{id}/kubeconfig", s.downloadKubeconfig)
+	opr("GET /api/v1/clusters/{id}/kubeconfig", s.downloadKubeconfig) // cluster-admin credentials
 	priv("GET /api/v1/clusters/{id}/k8s/overview", s.kubeOverview)
 	priv("GET /api/v1/clusters/{id}/k8s/namespaces", s.kubeNamespaces)
 	priv("GET /api/v1/clusters/{id}/k8s/namespaces-usage", s.namespaceUsage)
@@ -117,7 +139,7 @@ func (s *Server) Handler() http.Handler {
 	priv("POST /api/v1/clusters/{id}/images/prepull", s.prepullImages)
 	priv("POST /api/v1/clusters/{id}/images/prune", s.pruneImages)
 
-	priv("GET /api/v1/audit", s.listAudit)
+	opr("GET /api/v1/audit", s.listAudit)
 
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
@@ -166,16 +188,6 @@ func (r *statusRecorder) WriteHeader(code int) {
 // Unwrap lets http.ResponseController and websocket.Accept reach the hijacker.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
-func (s *Server) requireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := s.Auth.Verify(r); err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // --- JSON helpers ----------------------------------------------------------------
 
 type apiError struct {
@@ -198,7 +210,7 @@ func (s *Server) storeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, store.ErrConflict):
-		writeError(w, http.StatusConflict, "conflict", err.Error())
+		writeError(w, http.StatusConflict, "conflict", strings.TrimPrefix(err.Error(), store.ErrConflict.Error()+": "))
 	case errors.Is(err, context.Canceled):
 		writeError(w, 499, "cancelled", "request cancelled")
 	default:
@@ -222,11 +234,16 @@ func clientIP(r *http.Request) string {
 }
 
 func (s *Server) audit(r *http.Request, action, targetType, targetID string, details any) {
+	s.auditAs(r, actor(r), action, targetType, targetID, details)
+}
+
+// auditAs records an entry for an explicit actor (login, before a session exists).
+func (s *Server) auditAs(r *http.Request, who, action, targetType, targetID string, details any) {
 	var raw json.RawMessage
 	if details != nil {
 		raw, _ = json.Marshal(details)
 	}
-	if err := s.Store.AppendAudit(r.Context(), &store.AuditEntry{Actor: "admin", Action: action, TargetType: targetType,
+	if err := s.Store.AppendAudit(r.Context(), &store.AuditEntry{Actor: who, Action: action, TargetType: targetType,
 		TargetID: targetID, Details: raw, RemoteAddr: clientIP(r)}); err != nil {
 		s.Log.Error("audit write failed", "err", err)
 	}
@@ -236,34 +253,6 @@ func (s *Server) audit(r *http.Request, action, targetType, targetID string, det
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version})
-}
-
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
-		return
-	}
-	if !s.Auth.CheckToken(req.Token) {
-		time.Sleep(500 * time.Millisecond) // slow down guessing
-		s.audit(r, "auth.login_failed", "", "", nil)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid admin token")
-		return
-	}
-	s.Auth.Issue(w)
-	s.audit(r, "auth.login", "", "", nil)
-	writeJSON(w, http.StatusOK, map[string]string{"user": "admin"})
-}
-
-func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	s.Auth.Clear(w)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"user": "admin", "version": Version})
 }
 
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {

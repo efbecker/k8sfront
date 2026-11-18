@@ -49,7 +49,7 @@ func (s *Server) submitMaintenance(w http.ResponseWriter, r *http.Request, c *st
 			return
 		}
 	}
-	job, err := s.Engine.Submit(r.Context(), kind, "cluster", c.ID, params, "admin")
+	job, err := s.Engine.Submit(r.Context(), kind, "cluster", c.ID, params, actor(r))
 	if err != nil {
 		s.storeError(w, err)
 		return
@@ -401,7 +401,7 @@ func (s *Server) certsJob(w http.ResponseWriter, r *http.Request) {
 	kind := ops.KindCerts
 	if in.Action == "check" {
 		// Read-only: does not need to wait for other maintenance.
-		job, err := s.Engine.Submit(r.Context(), kind, "cluster", c.ID, ops.CertsParams{ClusterID: c.ID, Action: in.Action}, "admin")
+		job, err := s.Engine.Submit(r.Context(), kind, "cluster", c.ID, ops.CertsParams{ClusterID: c.ID, Action: in.Action}, actor(r))
 		if err != nil {
 			s.storeError(w, err)
 			return

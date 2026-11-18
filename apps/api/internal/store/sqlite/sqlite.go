@@ -861,3 +861,150 @@ func (d *DB) DeleteRegistry(ctx context.Context, id string) error {
 	}
 	return tx.Commit()
 }
+
+// --- users -----------------------------------------------------------------------
+
+const userCols = `id, username, display_name, email, source, role, password_hash, disabled, external_dn, groups,
+	session_epoch, last_login_at, created_at, updated_at`
+
+func scanUser(r scanner) (*store.User, error) {
+	var u store.User
+	var role, groups, created, updated string
+	var disabled int
+	var last sql.NullString
+	if err := r.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Email, &u.Source, &role, &u.PasswordHash, &disabled,
+		&u.ExternalDN, &groups, &u.SessionEpoch, &last, &created, &updated); err != nil {
+		return nil, err
+	}
+	u.Role, u.Disabled, u.Groups = store.Role(role), disabled != 0, parseList(groups)
+	u.LastLoginAt, u.CreatedAt, u.UpdatedAt = parseTSPtr(last), parseTS(created), parseTS(updated)
+	return &u, nil
+}
+
+func userConflict(err error, u *store.User) error {
+	if isUnique(err) {
+		return fmt.Errorf("%w: já existe um usuário %q", store.ErrConflict, u.Username)
+	}
+	return err
+}
+
+func countLocalAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM users WHERE source = ? AND role = ? AND disabled = 0`,
+		store.UserLocal, string(store.RoleAdmin)).Scan(&n)
+	return n, err
+}
+
+// guardAdmins runs change inside a transaction and rolls it back when it
+// takes the number of enabled local admins from one or more to zero.
+func (d *DB) guardAdmins(ctx context.Context, change func(tx *sql.Tx) error) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	before, err := countLocalAdmins(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := change(tx); err != nil {
+		return err
+	}
+	after, err := countLocalAdmins(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if before > 0 && after == 0 {
+		return store.ErrLastAdmin
+	}
+	return tx.Commit()
+}
+
+func (d *DB) CreateUser(ctx context.Context, u *store.User) error {
+	now := time.Now()
+	u.CreatedAt, u.UpdatedAt = now, now
+	_, err := d.db.ExecContext(ctx, `INSERT INTO users(`+userCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		u.ID, u.Username, u.DisplayName, u.Email, u.Source, string(u.Role), u.PasswordHash, boolInt(u.Disabled),
+		u.ExternalDN, jsonList(u.Groups), u.SessionEpoch, tsPtr(u.LastLoginAt), ts(u.CreatedAt), ts(u.UpdatedAt))
+	return userConflict(err, u)
+}
+
+func (d *DB) UpdateUser(ctx context.Context, u *store.User) error {
+	u.UpdatedAt = time.Now()
+	return d.guardAdmins(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE users SET username=?, display_name=?, email=?, source=?, role=?, password_hash=?,
+			disabled=?, external_dn=?, groups=?, session_epoch=?, last_login_at=?, updated_at=? WHERE id=?`,
+			u.Username, u.DisplayName, u.Email, u.Source, string(u.Role), u.PasswordHash, boolInt(u.Disabled),
+			u.ExternalDN, jsonList(u.Groups), u.SessionEpoch, tsPtr(u.LastLoginAt), ts(u.UpdatedAt), u.ID)
+		if err != nil {
+			return userConflict(err, u)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (d *DB) GetUser(ctx context.Context, id string) (*store.User, error) {
+	u, err := scanUser(d.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = ?`, id))
+	return u, notFound(err)
+}
+
+func (d *DB) GetUserByUsername(ctx context.Context, username string) (*store.User, error) {
+	u, err := scanUser(d.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE username = ?`, username))
+	return u, notFound(err)
+}
+
+func (d *DB) ListUsers(ctx context.Context) ([]store.User, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+userCols+` FROM users ORDER BY username COLLATE NOCASE`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []store.User{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) DeleteUser(ctx context.Context, id string) error {
+	return d.guardAdmins(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (d *DB) CountUsers(ctx context.Context) (int, error) {
+	var n int
+	err := d.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM users`).Scan(&n)
+	return n, err
+}
+
+// --- settings --------------------------------------------------------------------
+
+func (d *DB) GetSetting(ctx context.Context, key string) (json.RawMessage, error) {
+	var v string
+	err := d.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&v)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return json.RawMessage(v), nil
+}
+
+func (d *DB) PutSetting(ctx context.Context, key string, value json.RawMessage) error {
+	_, err := d.db.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at) VALUES (?,?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, key, string(value), ts(time.Now()))
+	return err
+}

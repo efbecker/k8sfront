@@ -55,12 +55,12 @@ export function JobDetailPage() {
           <>
             <JobStatusBadge status={job.status} />
             {canRetry && (
-              <Button variant="outline" size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
+              <Button requires="operator" variant="outline" size="sm" disabled={retry.isPending} onClick={() => retry.mutate()}>
                 <RotateCw /> Tentar novamente
               </Button>
             )}
             {canCancel && (
-              <Button variant="outline" size="sm" className="text-destructive" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+              <Button requires="operator" variant="outline" size="sm" className="text-destructive" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
                 <Ban /> {job.status === "paused" ? "Abortar fila" : "Cancelar"}
               </Button>
             )}

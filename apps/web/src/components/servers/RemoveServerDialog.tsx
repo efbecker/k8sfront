@@ -116,7 +116,7 @@ export function RemoveServerDialog({ server, open, onOpenChange, onRemoved }: { 
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Voltar
           </Button>
-          <Button variant="destructive" disabled={!p || !!p.blocked || typed.trim() !== server.name || remove.isPending} onClick={() => remove.mutate()}>
+          <Button requires="operator" variant="destructive" disabled={!p || !!p.blocked || typed.trim() !== server.name || remove.isPending} onClick={() => remove.mutate()}>
             {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
             {p?.inCluster ? "Drenar e remover" : "Remover do inventário"}
           </Button>

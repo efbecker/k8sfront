@@ -325,7 +325,7 @@ func (s *Server) helmJob(w http.ResponseWriter, r *http.Request) {
 		}
 		p.ValuesSecretID = id
 	}
-	job, err := s.Engine.Submit(r.Context(), ops.KindHelm, "cluster", c.ID, p, "admin")
+	job, err := s.Engine.Submit(r.Context(), ops.KindHelm, "cluster", c.ID, p, actor(r))
 	if err != nil {
 		if p.ValuesSecretID != "" {
 			_ = s.Secrets.Delete(context.Background(), p.ValuesSecretID)

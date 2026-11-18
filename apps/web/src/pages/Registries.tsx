@@ -224,7 +224,7 @@ function RegistryDialog({ registry, clusters, onClose }: { registry?: Registry; 
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={save.isPending}>
+            <Button requires="operator" type="submit" disabled={save.isPending}>
               {save.isPending && <Loader2 className="animate-spin" />} Salvar
             </Button>
           </DialogFooter>
@@ -296,10 +296,10 @@ function RegistryRow({ r, clusters, onEdit }: { r: Registry; clusters: Cluster[]
       <TableCell className="text-sm">{r.clusterIds.length ? r.clusterIds.map((id) => names.get(id) ?? id.slice(0, 8)).join(", ") : "todos"}</TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
-          <Button variant="ghost" size="icon" title="Testar conexão e credenciais" disabled={check.isPending} onClick={() => check.mutate()}>
+          <Button requires="operator" variant="ghost" size="icon" title="Testar conexão e credenciais" disabled={check.isPending} onClick={() => check.mutate()}>
             {check.isPending ? <Loader2 className="animate-spin" /> : <PlugZap />}
           </Button>
-          <Button variant="ghost" size="icon" title="Editar" onClick={onEdit}>
+          <Button requires="operator" variant="ghost" size="icon" title="Editar" onClick={onEdit}>
             <Pencil />
           </Button>
           <ConfirmButton
@@ -365,7 +365,7 @@ function ApplyCard({ clusters, jobs }: { clusters: Cluster[]; jobs: Job[] }) {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button size="sm" variant={running ? "outline" : "default"} disabled={running || (sync.isPending && sync.variables === c.id)} onClick={() => sync.mutate(c.id)}>
+                    <Button requires="operator" size="sm" variant={running ? "outline" : "default"} disabled={running || (sync.isPending && sync.variables === c.id)} onClick={() => sync.mutate(c.id)}>
                       {running ? <Loader2 className="animate-spin" /> : <UploadCloud />} {running ? "Aplicando…" : "Aplicar"}
                     </Button>
                   </TableCell>
@@ -409,7 +409,7 @@ export function RegistriesPage() {
         title="Registries"
         description="De onde os clusters baixam as imagens: Docker Hub, GHCR, Quay, Harbor, registries privados e mirrors."
         actions={
-          <Button onClick={() => setEditing("new")}>
+          <Button requires="operator" onClick={() => setEditing("new")}>
             <Plus /> Novo registry
           </Button>
         }

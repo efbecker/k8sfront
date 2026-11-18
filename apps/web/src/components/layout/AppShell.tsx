@@ -1,5 +1,6 @@
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Boxes,
   Container,
@@ -16,9 +17,16 @@ import {
   Layers,
   Warehouse,
   Loader2,
+  Users,
+  Eye,
+  KeyRound,
   type LucideIcon,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, roleLabel, roleRank, type Me, type Role } from "@/lib/api";
+import { RoleProvider, useCan } from "@/components/permissions";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme";
 import { Button } from "@/components/ui/button";
@@ -32,6 +40,7 @@ interface NavItem {
   icon: LucideIcon;
   phase?: number; // future modules, shown disabled until delivered
   clusterPage?: string; // route under /clusters/:id/ of the active cluster
+  minRole?: Role; // hidden below this role
 }
 
 const nav: { title: string; items: NavItem[] }[] = [
@@ -42,13 +51,14 @@ const nav: { title: string; items: NavItem[] }[] = [
       { to: "/servers", label: "Servidores", icon: Server },
       { to: "/registries", label: "Registries", icon: Warehouse },
       { to: "/jobs", label: "Operações", icon: ClipboardList },
-      { to: "/audit", label: "Auditoria", icon: ScrollText },
+      { to: "/audit", label: "Auditoria", icon: ScrollText, minRole: "operator" },
+      { to: "/users", label: "Usuários e acesso", icon: Users, minRole: "admin" },
     ],
   },
   {
     title: "Cluster",
     items: [
-      { to: "/clusters/new", label: "Wizard de Deploy", icon: Rocket },
+      { to: "/clusters/new", label: "Wizard de Deploy", icon: Rocket, minRole: "operator" },
       { to: "/overview", label: "Visão Geral", icon: LayoutDashboard, clusterPage: "overview" },
       { to: "/topology", label: "Topologia ao vivo", icon: Share2, clusterPage: "topology" },
       { to: "/workloads", label: "Workloads", icon: Container, clusterPage: "workloads" },
@@ -81,6 +91,8 @@ function Disabled({ item, title, tag }: { item: NavItem; title: string; tag?: st
 function SidebarItem({ item }: { item: NavItem }) {
   const { active } = useActiveCluster();
   const { pathname } = useLocation();
+  const allowed = useCan(item.minRole);
+  if (!allowed) return null;
   if (item.phase) return <Disabled item={item} title={`Chega na Fase ${item.phase}`} tag={`F${item.phase}`} />;
   if (item.clusterPage) {
     if (!active) return <Disabled item={item} title="Provisione um cluster pelo Wizard de Deploy primeiro" />;
@@ -149,8 +161,92 @@ function Logo() {
   );
 }
 
+/** Local users change their own password here. */
+function PasswordDialog({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const change = useMutation({ mutationFn: () => api.changePassword(current, next), onSuccess: onClose });
+  const mismatch = again !== "" && again !== next;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Trocar minha senha</DialogTitle>
+          <DialogDescription>As outras sessões abertas com a sua conta são encerradas.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            change.mutate();
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="pw-current">Senha atual</Label>
+            <Input id="pw-current" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="pw-new">Nova senha</Label>
+            <Input id="pw-new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+            <p className="text-muted-foreground text-xs">Ao menos 10 caracteres.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="pw-again">Repita a nova senha</Label>
+            <Input id="pw-again" type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} aria-invalid={mismatch} />
+            {mismatch && <p className="text-destructive text-xs">As senhas não conferem.</p>}
+          </div>
+          {change.error && <p className="text-destructive text-sm">{change.error.message}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={!current || !next || next !== again || change.isPending}>
+              {change.isPending && <Loader2 className="animate-spin" />} Salvar
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserBadge({ me }: { me: Me }) {
+  const [changing, setChanging] = useState(false);
+  const name = me.source === "token" ? "Token de administrador" : me.displayName || me.username;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="hidden text-right leading-tight sm:block">
+        <div className="max-w-48 truncate text-sm font-medium" title={me.source === "token" ? undefined : me.username}>
+          {name}
+        </div>
+        <div className="text-muted-foreground text-[11px]">
+          {roleLabel[me.role]}
+          {me.source === "ldap" ? " · LDAP/AD" : ""}
+        </div>
+      </div>
+      {me.source === "local" && (
+        <Button variant="ghost" size="icon" title="Trocar minha senha" aria-label="Trocar minha senha" onClick={() => setChanging(true)}>
+          <KeyRound />
+        </Button>
+      )}
+      {changing && <PasswordDialog onClose={() => setChanging(false)} />}
+    </div>
+  );
+}
+
 export function AppShell() {
   const { pathname } = useLocation();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
+  const role: Role = me.data?.role ?? "viewer";
+  return (
+    <RoleProvider role={role}>
+      <Shell me={me.data} pathname={pathname} />
+    </RoleProvider>
+  );
+}
+
+function Shell({ me, pathname }: { me?: Me; pathname: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const logout = useMutation({
@@ -187,13 +283,14 @@ export function AppShell() {
             <Logo />
           </div>
           <nav className="flex gap-1 md:hidden">
-            {nav[0]!.items.map((i) => (
+            {nav[0]!.items.filter((i) => !i.minRole || (me && roleRank[me.role] >= roleRank[i.minRole])).map((i) => (
               <NavLink key={i.to} to={i.to} className={({ isActive }) => cn("rounded px-2 py-1 text-sm", isActive && "bg-accent")}>
                 {i.label}
               </NavLink>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-1">
+            {me && <UserBadge me={me} />}
             <ThemeToggle />
             <Button variant="ghost" size="icon" title="Sair" aria-label="Sair" onClick={() => logout.mutate()}>
               <LogOut />
@@ -201,6 +298,14 @@ export function AppShell() {
           </div>
         </header>
         <main className="mx-auto w-full max-w-7xl flex-1 p-4 md:p-6">
+          {me?.role === "viewer" && (
+            <div className="bg-muted text-muted-foreground mb-4 flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+              <Eye className="size-4 shrink-0" />
+              <span>
+                Seu papel é <strong className="text-foreground font-medium">Leitura</strong>. Você pode ver tudo, mas as ações ficam desativadas.
+              </span>
+            </div>
+          )}
           <ErrorBoundary key={pathname}>
             <Outlet />
           </ErrorBoundary>

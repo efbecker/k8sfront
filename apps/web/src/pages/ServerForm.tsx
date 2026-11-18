@@ -151,7 +151,7 @@ export function ServerFormDialog({ open, onOpenChange, server, onSaved }: Props)
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button disabled={save.isPending}>
+            <Button requires="operator" disabled={save.isPending}>
               {save.isPending && <Loader2 className="animate-spin" />}
               {editing ? "Salvar" : "Adicionar"}
             </Button>

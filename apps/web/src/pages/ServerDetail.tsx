@@ -86,14 +86,14 @@ export function ServerDetailPage() {
         description={`${s.sshUser}@${s.host}:${s.port} · ${roleLabel(s.role)}`}
         actions={
           <>
-            <Button variant="outline" onClick={() => setEditing(true)}>
+            <Button requires="operator" variant="outline" onClick={() => setEditing(true)}>
               <Pencil /> Editar
             </Button>
-            <Button variant="outline" className="text-destructive" onClick={() => setRemoving(true)}>
+            <Button requires="operator" variant="outline" className="text-destructive" onClick={() => setRemoving(true)}>
               <Trash2 /> Remover
             </Button>
             <RemoveServerDialog server={s} open={removing} onOpenChange={setRemoving} onRemoved={() => navigate("/servers")} />
-            <Button disabled={test.isPending} onClick={() => test.mutate()}>
+            <Button requires="operator" disabled={test.isPending} onClick={() => test.mutate()}>
               {test.isPending ? <Loader2 className="animate-spin" /> : <Stethoscope />}
               Testar Conexão & Pré-requisitos
             </Button>
@@ -135,7 +135,7 @@ export function ServerDetailPage() {
             <CardDescription>Registrada no primeiro contato e verificada em toda conexão.</CardDescription>
             {hostKey.data && (
               <CardAction>
-                <Button
+                <Button requires="operator"
                   size="sm"
                   variant="ghost"
                   title="Esquecer a chave (após reinstalação do host)"

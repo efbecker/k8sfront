@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { CheckCircle2, CircleAlert, CircleDashed, Loader2, MinusCircle, PencilLine, Trash2 } from "lucide-react";
-import type { ApplySummary, DeleteRequest, Job, NSItem, ObjectRef } from "@/lib/api";
+import type { ApplySummary, DeleteRequest, Job, NSItem, ObjectRef, Role } from "@/lib/api";
 import { api, jobKindLabel } from "@/lib/api";
 import { JobStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +24,7 @@ export function DeleteCell({ target, onDelete }: { target: ObjectRef; onDelete: 
   if (isProtected(target)) return <TableCell />;
   return (
     <TableCell className="text-right">
-      <Button variant="ghost" size="icon" title={`Excluir ${target.kind} ${target.name}`} onClick={() => onDelete(target)}>
+      <Button requires="operator" variant="ghost" size="icon" title={`Excluir ${target.kind} ${target.name}`} onClick={() => onDelete(target)}>
         <Trash2 className="text-destructive" />
       </Button>
     </TableCell>
@@ -135,7 +135,9 @@ export function ConfirmButton({
   children,
   variant = "outline",
   size = "sm",
+  requires = "operator",
 }: {
+  requires?: Role;
   title: string;
   description: ReactNode;
   confirmLabel?: string;
@@ -149,7 +151,7 @@ export function ConfirmButton({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button variant={variant} size={size} disabled={disabled} onClick={() => setOpen(true)}>
+      <Button variant={variant} size={size} disabled={disabled} requires={requires} onClick={() => setOpen(true)}>
         {children}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -269,7 +271,7 @@ export function DeleteDialog({
             {done ? "Fechar" : "Voltar"}
           </Button>
           {!done && (
-            <Button variant="destructive" disabled={toDelete === 0 || typed.trim() !== confirmWord || run.isPending || check.isPending} onClick={() => run.mutate()}>
+            <Button requires="operator" variant="destructive" disabled={toDelete === 0 || typed.trim() !== confirmWord || run.isPending || check.isPending} onClick={() => run.mutate()}>
               {run.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />} Excluir {toDelete > 0 ? `${toDelete} objeto(s)` : ""}
             </Button>
           )}

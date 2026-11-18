@@ -16,6 +16,7 @@ export function AuditPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Quando</TableHead>
+                <TableHead>Quem</TableHead>
                 <TableHead>Ação</TableHead>
                 <TableHead>Alvo</TableHead>
                 <TableHead>Origem</TableHead>
@@ -26,6 +27,7 @@ export function AuditPage() {
               {(audit.data ?? []).map((e) => (
                 <TableRow key={e.id}>
                   <TableCell className="text-sm">{formatDate(e.ts)}</TableCell>
+                  <TableCell className="text-sm">{e.actor}</TableCell>
                   <TableCell className="font-mono text-xs">{e.action}</TableCell>
                   <TableCell className="font-mono text-xs">{e.targetType ? `${e.targetType}/${e.targetId.slice(0, 8)}` : "—"}</TableCell>
                   <TableCell className="text-sm">{e.remoteAddr}</TableCell>

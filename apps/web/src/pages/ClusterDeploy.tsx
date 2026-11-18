@@ -316,10 +316,10 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => preview.mutate()} disabled={preview.isPending}>
+              <Button requires="operator" variant="outline" onClick={() => preview.mutate()} disabled={preview.isPending}>
                 {preview.isPending ? <Loader2 className="animate-spin" /> : <Eye />} Pré-visualizar YAML
               </Button>
-              <Button variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending}>
+              <Button requires="operator" variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending}>
                 {run.isPending && run.variables === true ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Validar (dry-run)
               </Button>
               <ConfirmButton
@@ -338,7 +338,7 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
                   <FileCode2 /> Abrir no editor YAML
                 </Button>
               )}
-              <Button variant="ghost" className="text-destructive ml-auto" disabled={!app.name || !app.image} onClick={() => setDeleting(true)}>
+              <Button requires="operator" variant="ghost" className="text-destructive ml-auto" disabled={!app.name || !app.image} onClick={() => setDeleting(true)}>
                 <Trash2 /> Excluir aplicação
               </Button>
             </div>
@@ -395,7 +395,7 @@ function YamlTab({ clusterId, text, setText }: { clusterId: string; text: string
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <NamespacePicker clusterId={clusterId} value={ns} onChange={setNs} />
-            <Button variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending || !text.trim()}>
+            <Button requires="operator" variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending || !text.trim()}>
               {run.isPending ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Validar (dry-run)
             </Button>
             <ConfirmButton
@@ -412,7 +412,7 @@ function YamlTab({ clusterId, text, setText }: { clusterId: string; text: string
             {validated !== key && <span className="text-muted-foreground text-xs">Aplicar libera após um dry-run sem erros deste conteúdo.</span>}
             <div className="ml-auto flex items-center gap-3">
               <Toggle on={keepNs} onChange={setKeepNs} label="Manter namespaces" />
-              <Button variant="ghost" className="text-destructive" disabled={!text.trim()} onClick={() => setDeleting(true)}>
+              <Button requires="operator" variant="ghost" className="text-destructive" disabled={!text.trim()} onClick={() => setDeleting(true)}>
                 <Trash2 /> Excluir objetos do manifesto
               </Button>
             </div>
@@ -542,7 +542,7 @@ function HelmTab({ clusterId }: { clusterId: string }) {
           </div>
           <YamlEditor value={form.values} onChange={(v) => setForm({ ...form, values: v })} height={240} />
           <div className="flex flex-wrap items-center gap-2">
-            <Button
+            <Button requires="operator"
               disabled={submit.isPending || !form.release || !form.chart}
               onClick={() =>
                 submit.mutate({ action: "install", release: form.release, namespace: form.namespace, repo: form.repo, chart: form.chart, version: form.version, values: valuesBody ? form.values : "" })

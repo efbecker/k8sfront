@@ -82,7 +82,7 @@ function NamespacesTab({ clusterId }: { clusterId: string }) {
                   <TableCell />
                 ) : (
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" title={`Excluir namespace ${u.name}`} onClick={() => setDel(u.name)}>
+                    <Button requires="operator" variant="ghost" size="icon" title={`Excluir namespace ${u.name}`} onClick={() => setDel(u.name)}>
                       <Trash2 className="text-destructive" />
                     </Button>
                   </TableCell>

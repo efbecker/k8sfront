@@ -150,7 +150,7 @@ export function ClusterImagesPage() {
               </div>
             )}
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" disabled={sync.isPending || (lastSync && !isFinal(lastSync.status))} onClick={() => sync.mutate()}>
+              <Button requires="operator" size="sm" disabled={sync.isPending || (lastSync && !isFinal(lastSync.status))} onClick={() => sync.mutate()}>
                 <UploadCloud /> Aplicar neste cluster
               </Button>
               <Button size="sm" variant="outline" asChild>
@@ -181,7 +181,7 @@ export function ClusterImagesPage() {
               aria-label="Imagens para pré-pull"
             />
             {selected.size > 0 && <p className="text-muted-foreground text-xs">+ {selected.size} selecionada(s) na tabela abaixo.</p>}
-            <Button size="sm" disabled={toPull.length === 0 || toPull.length > 20 || prepull.isPending} onClick={() => prepull.mutate(toPull)}>
+            <Button requires="operator" size="sm" disabled={toPull.length === 0 || toPull.length > 20 || prepull.isPending} onClick={() => prepull.mutate(toPull)}>
               {prepull.isPending ? <Loader2 className="animate-spin" /> : <CloudDownload />} Baixar {toPull.length || ""} imagem(ns)
             </Button>
             {toPull.length > 20 && <p className="text-destructive text-xs">No máximo 20 imagens por vez.</p>}

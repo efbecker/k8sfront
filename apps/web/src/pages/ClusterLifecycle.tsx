@@ -126,10 +126,10 @@ function UpgradeCard({ id, plan, jobs }: { id: string; plan: UpgradePlan; jobs?:
               </Button>
               {(paused.status === "paused" || paused.status === "failed") && (
                 <>
-                  <Button size="sm" onClick={() => retry.mutate(paused.id)} disabled={retry.isPending}>
+                  <Button requires="operator" size="sm" onClick={() => retry.mutate(paused.id)} disabled={retry.isPending}>
                     <RotateCw /> Retomar
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => cancel.mutate(paused.id)} disabled={cancel.isPending}>
+                  <Button requires="operator" size="sm" variant="ghost" onClick={() => cancel.mutate(paused.id)} disabled={cancel.isPending}>
                     <Ban /> Abortar
                   </Button>
                 </>
@@ -300,7 +300,7 @@ function AddNodeDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={!sel || add.isPending} onClick={() => add.mutate()}>
+          <Button requires="operator" disabled={!sel || add.isPending} onClick={() => add.mutate()}>
             {add.isPending ? <Loader2 className="animate-spin" /> : <Plus />} Adicionar
           </Button>
         </DialogFooter>
@@ -354,11 +354,11 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
         </CardDescription>
         <CardAction className="flex gap-2">
           {canAddCP && (
-            <Button size="sm" variant="outline" onClick={() => setAdding("control-plane")}>
+            <Button requires="operator" size="sm" variant="outline" onClick={() => setAdding("control-plane")}>
               <Plus /> Adicionar control plane
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => setAdding("worker")}>
+          <Button requires="operator" size="sm" variant="outline" onClick={() => setAdding("worker")}>
             <Plus /> Adicionar worker
           </Button>
         </CardAction>
@@ -402,11 +402,11 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
                     {/* Fixed-width slots keep the buttons aligned across rows. */}
                     <div className="flex items-center justify-end gap-1">
                       {n.unschedulable ? (
-                        <Button size="sm" variant="ghost" className="w-28 justify-start" onClick={() => uncordon.mutate(n.name)} disabled={uncordon.isPending}>
+                        <Button requires="operator" size="sm" variant="ghost" className="w-28 justify-start" onClick={() => uncordon.mutate(n.name)} disabled={uncordon.isPending}>
                           <Play /> Uncordon
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" className="w-28 justify-start" onClick={() => cordon.mutate(n.name)} disabled={cordon.isPending}>
+                        <Button requires="operator" size="sm" variant="ghost" className="w-28 justify-start" onClick={() => cordon.mutate(n.name)} disabled={cordon.isPending}>
                           <CircleSlash /> Cordon
                         </Button>
                       )}
@@ -482,7 +482,7 @@ function OSCard({ id, jobs, members }: { id: string; jobs?: Job[]; members: Serv
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => check.mutate()} disabled={check.isPending || (last && !isFinal(last.status))}>
+          <Button requires="operator" variant="outline" onClick={() => check.mutate()} disabled={check.isPending || (last && !isFinal(last.status))}>
             {check.isPending || (last && !isFinal(last.status)) ? <Loader2 className="animate-spin" /> : <Search />} Verificar atualizações
           </Button>
           <NativeSelect className="w-60" value={policy} onChange={(e) => setPolicy(e.target.value as RebootPolicy)} aria-label="Política de reboot">
@@ -624,7 +624,7 @@ function CertsCard({ id, jobs }: { id: string; jobs?: Job[] }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => run.mutate("check")} disabled={run.isPending || !!running}>
+          <Button requires="operator" variant="outline" onClick={() => run.mutate("check")} disabled={run.isPending || !!running}>
             {running ? <Loader2 className="animate-spin" /> : <Search />} Verificar validade
           </Button>
           <ConfirmButton

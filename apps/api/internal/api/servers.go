@@ -374,7 +374,7 @@ func (s *Server) submitPreflight(w http.ResponseWriter, r *http.Request, ids []s
 	if len(uniq) == 1 {
 		targetType, targetID = "server", uniq[0]
 	}
-	job, err := s.Engine.Submit(r.Context(), ops.KindPreflight, targetType, targetID, ops.PreflightParams{ServerIDs: uniq}, "admin")
+	job, err := s.Engine.Submit(r.Context(), ops.KindPreflight, targetType, targetID, ops.PreflightParams{ServerIDs: uniq}, actor(r))
 	if err != nil {
 		s.storeError(w, err)
 		return
