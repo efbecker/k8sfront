@@ -196,6 +196,13 @@ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.
 - Um job por alvo (`target_type/target_id`) executa por vez; workers configuráveis (`K8SFRONT_WORKERS`).
 - `attempts` incrementa a cada execução. Etapas (`job_steps`): `pending → running → succeeded | failed | skipped`.
   `StepOnce` marca como `skipped` uma etapa já concluída numa tentativa anterior (retomada idempotente).
+- Antes do circuit breaker, upgrade, OS update/rolling reboot e renovação de certificados tentam o **mesmo nó**
+  até 3 vezes (`Ops.RetryAttempts`), esperando 30s × tentativa (`Ops.RetryDelay`) e reconectando o SSH; o nó
+  fica em cordon entre as tentativas e só é devolvido ao serviço (`restore-node.sh`) depois da última. Erros
+  permanentes (host key divergente, não é Debian 13+, sudo recusado, cancelamento) não são repetidos. O erro de
+  um script inclui a linha que o explica (último `E:` do apt ou a última linha de stderr), e o `apt_get` dos
+  scripts espera apt-daily/unattended-upgrades, limpa o cache e, se falhar de novo, imprime um diagnóstico
+  (disco, processos do apt, holds, repositórios, `dpkg --audit`).
 - `jobs.Pause(err)` é o **circuit breaker**: o pipeline para no nó atual com o erro exato e o operador escolhe
   **Tentar novamente** (retry na etapa atual, pulando as concluídas) ou **Abortar fila** (cancel).
 
@@ -444,7 +451,8 @@ validação Debian 13+) e o kubelet ativo. A renovação de certificados recoloc
   Pré-checks: `kubeadm upgrade plan`, todos os nós `Ready`, saúde do etcd, APIs depreciadas, PDBs bloqueantes,
   **snapshot do etcd**. Ordem: CP primário (`kubeadm upgrade apply`) → CPs adicionais (`kubeadm upgrade node`) →
   workers **um por vez** (cordon → drain → kubeadm → kubelet/kubectl → restart → `Ready` → uncordon).
-  Cada nó é uma etapa `StepOnce`; erro ou timeout → `jobs.Pause` (circuit breaker) antes do próximo nó.
+  Cada nó é uma etapa `StepOnce`; erro ou timeout → até 3 tentativas no mesmo nó → `jobs.Pause` (circuit breaker)
+  antes do próximo nó.
 - **OS patching (`servers.os-update`)**: `apt-get update`, lista de atualizáveis com destaque para
   `trixie-security`, aplicação nó a nó preservando `apt-mark hold`, detecção de `/var/run/reboot-required`.
 - **Rolling reboot**: cordon + drain → `systemctl reboot` → aguarda SSH voltar → aguarda `Ready` → uncordon → próximo.

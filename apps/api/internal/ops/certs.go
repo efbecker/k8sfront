@@ -52,12 +52,14 @@ func (o *Ops) certs(ctx context.Context, jc *jobs.Context) error {
 		var out string
 		var err error
 		if p.Action == "renew" {
-			err = b.jc.StepOnce(ctx, "certs-renew", n.Name+": kubeadm certs renew all + restart do control plane", &id, func(ctx context.Context, st *store.JobStep) error {
-				r, err := b.on(ctx, st, n, n, bootstrap.CertsRenewScript())
-				if r != nil {
-					out = r.Stdout
-				}
-				return err
+			err = b.retryNode(ctx, n, func(ctx context.Context, _ bool) error {
+				return b.jc.StepOnce(ctx, "certs-renew", n.Name+": kubeadm certs renew all + restart do control plane", &id, func(ctx context.Context, st *store.JobStep) error {
+					r, err := b.on(ctx, st, n, n, bootstrap.CertsRenewScript())
+					if r != nil {
+						out = r.Stdout
+					}
+					return err
+				})
 			})
 			if err != nil {
 				return pause(n, err)

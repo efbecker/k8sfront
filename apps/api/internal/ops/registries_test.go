@@ -24,7 +24,7 @@ func (f fakeKube) Get(context.Context, string) (*kube.Cluster, error) {
 
 func TestRegistriesSyncNodeByNodeAndPullSecrets(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{"w1:registries": true}, hosts: map[string]string{}, boot: map[string]int{}}
+	f := &lcFake{failOnce: map[string]int{"w1:registries": 1}, hosts: map[string]string{}, boot: map[string]int{}}
 	cs := fake.NewClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "apps"}},
 		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "apps"}},
@@ -91,7 +91,7 @@ func TestRegistryHostsRendersOnlyClusterRegistries(t *testing.T) {
 
 func TestImagePrune(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}}
 	db, engine := newLifecycleEnv(t, f, threeNodes)
 	job, err := engine.Submit(ctx, KindImagePrune, "cluster", "c1", PruneParams{ClusterID: "c1", ServerIDs: []string{"w1", "w2"}}, "test")
 	if err != nil {
@@ -110,7 +110,7 @@ func TestImagePrune(t *testing.T) {
 
 func TestImagePrepull(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}}
 	cs := fake.NewClientset()
 	db, engine, _ := newLifecycleEnvKube(t, f, threeNodes, "{}", fakeKube{cs})
 	// Play the DaemonSet controller + kubelet: one pod per node once the

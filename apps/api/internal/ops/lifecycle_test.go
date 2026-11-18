@@ -30,7 +30,7 @@ import (
 type lcFake struct {
 	mu       sync.Mutex
 	log      []string
-	failOnce map[string]bool
+	failOnce map[string]int    // key -> failures left
 	hosts    map[string]string // server name -> IP
 	boot     map[string]int
 	ca       string
@@ -74,9 +74,13 @@ func (r *lcRunner) Run(ctx context.Context, script string, opts sshx.RunOptions,
 	defer f.mu.Unlock()
 	key := r.node + ":" + op
 	f.log = append(f.log, key)
-	if f.failOnce[key] {
-		delete(f.failOnce, key)
-		return &sshx.Result{ExitCode: 1}, &sshx.ExitError{Code: 1}
+	if f.failOnce[key] > 0 {
+		f.failOnce[key]--
+		if sink != nil {
+			sink(store.StreamStdout, "Reading package lists...")
+			sink(store.StreamStderr, "E: Failed to fetch https://pkgs.k8s.io/x.deb  Connection timed out")
+		}
+		return &sshx.Result{ExitCode: 100}, &sshx.ExitError{Code: 100}
 	}
 	switch op {
 	case "get-nodes":
@@ -177,7 +181,7 @@ func newLifecycleEnvKube(t *testing.T, f *lcFake, nodes []struct {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	engine := jobs.New(db, jobs.NewHub(db, logger), logger, 2)
-	o := &Ops{Store: db, Secrets: sec, Kube: kubeClients, PollInterval: 5 * time.Millisecond, RebootTimeout: 5 * time.Second,
+	o := &Ops{Store: db, Secrets: sec, Kube: kubeClients, PollInterval: 5 * time.Millisecond, RebootTimeout: 5 * time.Second, RetryDelay: -1,
 		Open: func(_ context.Context, s *store.Server, _ remote.Hooks) (Runner, error) {
 			return &lcRunner{f: f, node: s.Name}, nil
 		}}
@@ -198,9 +202,30 @@ var threeNodes = []struct {
 	role store.NodeRole
 }{{"cp1", store.RoleControlPlane}, {"w1", store.RoleWorker}, {"w2", store.RoleWorker}}
 
+func TestUpgradeRetriesTransientFailureWithoutPausing(t *testing.T) {
+	ctx := context.Background()
+	f := &lcFake{failOnce: map[string]int{"w1:kubelet": 1}, hosts: map[string]string{}, boot: map[string]int{}}
+	db, engine := newLifecycleEnv(t, f, threeNodes)
+	job, err := engine.Submit(ctx, KindUpgrade, "cluster", "c1", UpgradeParams{ClusterID: "c1", From: "v1.37.2", Hops: []string{"v1.38.1"}}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitJob(t, db, job.ID, store.JobSucceeded)
+	for entry, want := range map[string]int{"w1:kubelet": 2, "cp1:drain>k8s-w1": 2, "cp1:restore>k8s-w1": 0, "cp1:uncordon>k8s-w1": 1, "w1:kubeadm-node": 1} {
+		if got := f.count(entry); got != want {
+			t.Errorf("%s ran %d times, want %d (log %v)", entry, got, want, f.log)
+		}
+	}
+	// The retry happens on w1 before w2 is touched.
+	if f.index("w2:repo") < f.index("cp1:uncordon>k8s-w1") {
+		t.Fatalf("w2 must start only after w1 succeeded: %v", f.log)
+	}
+}
+
 func TestUpgradeOneNodeAtATimeWithCircuitBreaker(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{"w1:kubelet": true}, hosts: map[string]string{}, boot: map[string]int{}}
+	// Fails every automatic attempt (3): only then the job pauses.
+	f := &lcFake{failOnce: map[string]int{"w1:kubelet": defaultRetryAttempts}, hosts: map[string]string{}, boot: map[string]int{}}
 	db, engine := newLifecycleEnv(t, f, threeNodes)
 
 	if _, err := ValidateHops("v1.36.4", []string{"v1.38.1"}); err == nil {
@@ -211,13 +236,17 @@ func TestUpgradeOneNodeAtATimeWithCircuitBreaker(t *testing.T) {
 		t.Fatal(err)
 	}
 	paused := waitJob(t, db, job.ID, store.JobPaused)
-	if !strings.Contains(paused.Error, "w1") {
-		t.Fatalf("pause error should name the node: %q", paused.Error)
+	if !strings.Contains(paused.Error, "w1") || !strings.Contains(paused.Error, "status 100: E: Failed to fetch") || !strings.Contains(paused.Error, "3 tentativas") {
+		t.Fatalf("pause error should name the node, apt's E: line and the attempts: %q", paused.Error)
 	}
 	// Circuit breaker: w2 was not touched; w1 is not upgraded but goes back
-	// to service if still Ready (restore), never through the normal uncordon.
+	// to service if still Ready (restore, only after the last attempt), never
+	// through the normal uncordon.
 	if f.count("w2:repo") != 0 || f.count("w2:kubeadm-node") != 0 || f.count("cp1:uncordon>k8s-w1") != 0 {
 		t.Fatalf("job continued past the failing node: %v", f.log)
+	}
+	if f.count("w1:kubelet") != 3 || f.count("cp1:restore>k8s-w1") != 1 {
+		t.Fatalf("want 3 attempts and one restore: %v", f.log)
 	}
 	if f.index("cp1:restore>k8s-w1") < f.index("w1:kubelet") {
 		t.Fatalf("failed node must be restored after the failure: %v", f.log)
@@ -235,7 +264,8 @@ func TestUpgradeOneNodeAtATimeWithCircuitBreaker(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitJob(t, db, job.ID, store.JobSucceeded)
-	for entry, want := range map[string]int{"cp1:kubeadm-apply": 1, "cp1:precheck": 1, "w1:kubeadm-node": 1, "w1:kubelet": 2,
+	for entry, want := range map[string]int{"cp1:kubeadm-apply": 1, "cp1:precheck": 1, "w1:kubeadm-node": 1, "w1:kubelet": 4,
+		"cp1:drain>k8s-w1": 4, "cp1:drain>k8s-cp1": 1, "cp1:restore>k8s-w1": 1,
 		"cp1:uncordon>k8s-w1": 1, "w2:kubeadm-node": 1, "cp1:uncordon>k8s-w2": 1, "cp1:etcd-snapshot>k8s-cp1": 1} {
 		if got := f.count(entry); got != want {
 			t.Errorf("%s ran %d times, want %d (log %v)", entry, got, want, f.log)
@@ -256,7 +286,7 @@ func TestUpgradeOneNodeAtATimeWithCircuitBreaker(t *testing.T) {
 
 func TestRollingRebootWaitsForNewBoot(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}}
 	db, engine := newLifecycleEnv(t, f, threeNodes)
 	job, err := engine.Submit(ctx, KindOSUpdate, "cluster", "c1", OSUpdateParams{ClusterID: "c1", ServerIDs: []string{"w1", "w2"}, Reboot: RebootIfRequired}, "test")
 	if err != nil {
@@ -276,7 +306,7 @@ func TestRollingRebootWaitsForNewBoot(t *testing.T) {
 
 func TestNodeAddAndRemove(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
 	db, engine := newLifecycleEnv(t, f, threeNodes)
 	job, err := engine.Submit(ctx, KindNodeAdd, "cluster", "c1", NodeParams{ClusterID: "c1", ServerID: "w2"}, "test")
 	if err != nil {
@@ -317,7 +347,7 @@ func TestNodeAddAndRemove(t *testing.T) {
 
 func TestControlPlaneAddAndRemoveWithLocalProxy(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
 	// cp0 is the control plane being added (already attached by the API); it
 	// sorts first, so the job must not use it as the primary.
 	nodes := []struct {
@@ -372,7 +402,7 @@ func TestControlPlaneAddAndRemoveWithLocalProxy(t *testing.T) {
 
 func TestControlPlaneAddRefusedOnDirectEndpoint(t *testing.T) {
 	ctx := context.Background()
-	f := &lcFake{failOnce: map[string]bool{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
+	f := &lcFake{failOnce: map[string]int{}, hosts: map[string]string{}, boot: map[string]int{}, ca: testCA(t)}
 	nodes := []struct {
 		name string
 		role store.NodeRole

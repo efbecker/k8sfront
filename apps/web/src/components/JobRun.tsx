@@ -22,6 +22,10 @@ const FILL = "absolute inset-0 overflow-hidden rounded-lg border bg-[#fafafa] p-
 
 export function JobRun({ jobId, names }: { jobId: string; names: Map<string, string> }) {
   const consoles = useRef(new Map<string, LogConsoleHandle | null>());
+  // Lines per node, kept so a node tab that appears later (its first line
+  // or step arrives mid-stream) starts with everything already received.
+  const perNode = useRef(new Map<string, LogLine[]>());
+  const [logNodes, setLogNodes] = useState<string[]>([]);
   const [tab, setTab] = useState<string>("all");
   const nameOf = useCallback((id: string) => names.get(id), [names]);
   const onLines = useCallback((lines: LogLine[]) => {
@@ -31,7 +35,25 @@ export function JobRun({ jobId, names }: { jobId: string; names: Map<string, str
       if (!l.serverId) continue;
       byNode.set(l.serverId, [...(byNode.get(l.serverId) ?? []), l]);
     }
-    for (const [id, ls] of byNode) consoles.current.get(id)?.write(ls);
+    let added = false;
+    for (const [id, ls] of byNode) {
+      const buf = perNode.current.get(id);
+      if (buf) buf.push(...ls);
+      else {
+        perNode.current.set(id, [...ls]);
+        added = true;
+      }
+      consoles.current.get(id)?.write(ls);
+    }
+    if (added) setLogNodes([...perNode.current.keys()]);
+  }, []);
+  const seeded = useRef(new Set<string>());
+  const attach = useCallback((id: string, h: LogConsoleHandle | null) => {
+    consoles.current.set(id, h);
+    if (h && id !== "all" && !seeded.current.has(id)) {
+      seeded.current.add(id);
+      h.write(perNode.current.get(id) ?? []);
+    }
   }, []);
   const { state, job } = useJobStream(jobId, onLines);
 
@@ -43,7 +65,15 @@ export function JobRun({ jobId, names }: { jobId: string; names: Map<string, str
     }
     return [...m.entries()];
   }, [job?.steps]);
-  const nodeIds = [...names.keys()];
+  // Tabs are the servers of this job (its steps and log lines), not the
+  // current cluster members: nodes added later have nothing in an old job.
+  const nodeIds = useMemo(() => {
+    const ids = new Set<string>(logNodes);
+    for (const st of job?.steps ?? []) if (st.serverId) ids.add(st.serverId);
+    const order = [...names.keys()];
+    const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+    return [...ids].sort((a, b) => rank(a) - rank(b));
+  }, [logNodes, job?.steps, names]);
   const current = (steps: JobStep[]) => steps.filter((s) => s.status !== "skipped").at(-1);
 
   return (
@@ -97,14 +127,14 @@ export function JobRun({ jobId, names }: { jobId: string; names: Map<string, str
                   onClick={() => setTab(id)}
                   className={cn("rounded-md border px-2.5 py-1 text-xs", tab === id ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent")}
                 >
-                  {id === "all" ? "Todos" : names.get(id)}
+                  {id === "all" ? "Todos" : (names.get(id) ?? id.slice(0, 8))}
                 </button>
               ))}
             </div>
           )}
           {["all", ...nodeIds].map((id) => (
             <div key={id} className={tab === id ? "relative min-h-[460px] flex-1" : "hidden"}>
-              <LogConsole ref={(h) => void consoles.current.set(id, h)} serverName={id === "all" ? nameOf : undefined} className={FILL} />
+              <LogConsole ref={(h) => attach(id, h)} serverName={id === "all" ? nameOf : undefined} className={FILL} />
             </div>
           ))}
         </CardContent>

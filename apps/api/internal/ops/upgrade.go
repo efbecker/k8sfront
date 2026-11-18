@@ -89,8 +89,10 @@ func (o *Ops) upgrade(ctx context.Context, jc *jobs.Context) error {
 
 	for _, v := range hops {
 		tag := "upgrade-" + v.String() + ":"
-		if err := b.stepOn(ctx, primary, primary, tag+"etcd-snapshot", "snapshot do etcd antes de "+v.String(), func() string {
-			return bootstrap.EtcdSnapshotScript(names[primary.ID], "pre-"+v.String())
+		if err := b.retryNode(ctx, primary, func(ctx context.Context, _ bool) error {
+			return b.stepOn(ctx, primary, primary, tag+"etcd-snapshot", "snapshot do etcd antes de "+v.String(), func() string {
+				return bootstrap.EtcdSnapshotScript(names[primary.ID], "pre-"+v.String())
+			})
 		}); err != nil {
 			return pause(primary, err)
 		}
@@ -100,15 +102,18 @@ func (o *Ops) upgrade(ctx context.Context, jc *jobs.Context) error {
 			if apply {
 				kubeadmName = "kubeadm " + v.String() + " + kubeadm upgrade apply"
 			}
-			err := b.stepOn(ctx, n, n, tag+"repo", "repositório pkgs.k8s.io "+v.MinorString(), func() string { return bootstrap.RepoScriptFor(v) })
-			if err == nil {
-				err = b.stepOn(ctx, n, n, tag+"kubeadm", kubeadmName, func() string { return bootstrap.UpgradeKubeadmScript(v, apply) })
-			}
-			if err == nil {
-				err = b.maintain(ctx, n, names[n.ID], tag, single, func(ctx context.Context) error {
-					return b.stepOn(ctx, n, n, tag+"kubelet", "kubelet e kubectl "+v.String()+" (unhold → install → hold)", func() string { return bootstrap.UpgradeKubeletScript(v) })
-				}, v.String())
-			}
+			err := b.retryNode(ctx, n, func(ctx context.Context, final bool) error {
+				err := b.stepOn(ctx, n, n, tag+"repo", "repositório pkgs.k8s.io "+v.MinorString(), func() string { return bootstrap.RepoScriptFor(v) })
+				if err == nil {
+					err = b.stepOn(ctx, n, n, tag+"kubeadm", kubeadmName, func() string { return bootstrap.UpgradeKubeadmScript(v, apply) })
+				}
+				if err == nil {
+					err = b.maintain(ctx, n, names[n.ID], tag, single, final, func(ctx context.Context) error {
+						return b.stepOn(ctx, n, n, tag+"kubelet", "kubelet e kubectl "+v.String()+" (unhold → install → hold)", func() string { return bootstrap.UpgradeKubeletScript(v) })
+					}, v.String())
+				}
+				return err
+			})
 			if err != nil {
 				return pause(n, err)
 			}

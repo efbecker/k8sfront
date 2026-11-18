@@ -143,31 +143,38 @@ func (o *Ops) rolling(ctx context.Context, jc *jobs.Context, clusterID string, i
 	}
 	rebooted := 0
 	for _, n := range nodes {
-		if upgrade {
-			if err := b.nodeStep(ctx, n, "os-upgrade", "apt-get upgrade (holds preservados)", bootstrap.OSUpgradeScript); err != nil {
-				return pause(n, err)
+		didReboot := false
+		err := b.retryNode(ctx, n, func(ctx context.Context, final bool) error {
+			if upgrade {
+				if err := b.nodeStep(ctx, n, "os-upgrade", "apt-get upgrade (holds preservados)", bootstrap.OSUpgradeScript); err != nil {
+					return err
+				}
 			}
-		}
-		do := reboot == RebootAlways
-		if reboot == RebootIfRequired {
-			out, err := b.quiet(ctx, n, readRebootRequired)
-			if err != nil {
-				return pause(n, err)
+			do := reboot == RebootAlways
+			if reboot == RebootIfRequired {
+				out, err := b.quiet(ctx, n, readRebootRequired)
+				if err != nil {
+					return err
+				}
+				do = strings.TrimSpace(out) == "yes"
+				if !do {
+					jc.Logf(&n.ID, "  %s: nenhum reboot pendente", n.Name)
+				}
 			}
-			do = strings.TrimSpace(out) == "yes"
 			if !do {
-				jc.Logf(&n.ID, "  %s: nenhum reboot pendente", n.Name)
+				return nil
 			}
-		}
-		if !do {
-			continue
-		}
-		if err := b.maintain(ctx, n, names[n.ID], "", single, func(ctx context.Context) error {
-			return b.rebootAndWait(ctx, n, "reboot")
-		}, ""); err != nil {
+			didReboot = true
+			return b.maintain(ctx, n, names[n.ID], "", single, final, func(ctx context.Context) error {
+				return b.rebootAndWait(ctx, n, "reboot")
+			}, "")
+		})
+		if err != nil {
 			return pause(n, err)
 		}
-		rebooted++
+		if didReboot {
+			rebooted++
+		}
 	}
 	jc.Logf(nil, "✔ %d nó(s) processado(s), %d reiniciado(s)", len(nodes), rebooted)
 	return nil

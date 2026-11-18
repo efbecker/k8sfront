@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/efbecker/k8sfront/apps/api/internal/bootstrap"
@@ -86,7 +87,49 @@ func (b *bootstrapRun) on(ctx context.Context, step *store.JobStep, runOn, recor
 		return nil, err
 	}
 	id := recordFor.ID
-	return b.runner(runOn.ID).Run(ctx, script, sshx.RunOptions{Sudo: true}, b.jc.Sink(step, &id))
+	sink, cause := errorCause(b.jc.Sink(step, &id))
+	res, err := b.runner(runOn.ID).Run(ctx, script, sshx.RunOptions{Sudo: true}, sink)
+	return res, withCause(err, cause())
+}
+
+// errorCause wraps a sink to remember the line that best explains a failed
+// script: apt's last "E:" line, otherwise the last line on stderr.
+func errorCause(sink sshx.Sink) (sshx.Sink, func() string) {
+	var aptErr, lastErr string
+	var mu sync.Mutex
+	return func(stream store.LogStream, line string) {
+			if t := strings.TrimSpace(line); t != "" {
+				mu.Lock()
+				if strings.HasPrefix(t, "E: ") || strings.HasPrefix(t, "dpkg: error") {
+					aptErr = t
+				} else if stream == store.StreamStderr {
+					lastErr = t
+				}
+				mu.Unlock()
+			}
+			sink(stream, line)
+		}, func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			if aptErr != "" {
+				return aptErr
+			}
+			return lastErr
+		}
+}
+
+// withCause appends the explaining line to a non-zero exit, so the step and
+// the paused job say why (e.g. "status 100: E: Unable to locate package")
+// instead of only the exit status.
+func withCause(err error, cause string) error {
+	var ee *sshx.ExitError
+	if err == nil || cause == "" || !errors.As(err, &ee) {
+		return err
+	}
+	if len(cause) > 300 {
+		cause = cause[:300] + "…"
+	}
+	return fmt.Errorf("%w: %s", err, cause)
 }
 
 // stepOn is a resumable step for node n executed on runOn.
@@ -177,7 +220,10 @@ func (b *bootstrapRun) resolveNames(ctx context.Context, nodes []bootstrap.Node)
 // Ready (e.g. apt could not download a package and the old kubelet keeps
 // running), it is uncordoned so it does not sit idle while paused; that is
 // why the drain is not a StepOnce: Retomar drains it again before retrying.
-func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, prefix string, single bool, action func(ctx context.Context) error, version string) error {
+//
+// With final false (an automatic retry will follow) a failed node is left
+// cordoned instead of restored, to avoid churning its pods between attempts.
+func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, prefix string, single, final bool, action func(ctx context.Context) error, version string) error {
 	p := b.primary()
 	id := n.ID
 	if done, err := b.jc.Completed(ctx, prefix+"uncordon", &id); err != nil {
@@ -197,7 +243,9 @@ func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, pre
 		return err
 	}
 	if err := action(ctx); err != nil {
-		b.restore(ctx, n, name, prefix)
+		if final {
+			b.restore(ctx, n, name, prefix)
+		}
 		return err
 	}
 	waitName := "aguardar Ready"
@@ -205,7 +253,9 @@ func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, pre
 		waitName = "aguardar Ready com kubelet " + version
 	}
 	if err := b.stepOn(ctx, n, p, prefix+"ready", waitName, func() string { return bootstrap.WaitNodeScript(name, version) }); err != nil {
-		b.restore(ctx, n, name, prefix)
+		if final {
+			b.restore(ctx, n, name, prefix)
+		}
 		return err
 	}
 	return b.stepOn(ctx, n, p, prefix+"uncordon", "uncordon", func() string { return bootstrap.UncordonScript(name) })
@@ -308,6 +358,69 @@ func (b *bootstrapRun) orderedNodes(ids []string) []bootstrap.Node {
 		}
 	}
 	return out
+}
+
+// Automatic retries of one node's rolling work before the job pauses.
+const (
+	defaultRetryAttempts = 3
+	defaultRetryDelay    = 30 * time.Second
+)
+
+// retryNode runs one node's work up to Ops.RetryAttempts times (default 3),
+// waiting RetryDelay × attempt between them, and only then returns the error
+// for the caller to pause the job: transient failures (a mirror hiccup, apt
+// locked by unattended-upgrades, a slow kubelet) heal without the operator.
+// The next node is never touched while this one is being retried. fn gets
+// final=true on the last attempt. Permanent errors (host key mismatch, not
+// Debian 13+, sudo refused, cancellation) are not retried.
+func (b *bootstrapRun) retryNode(ctx context.Context, n bootstrap.Node, fn func(ctx context.Context, final bool) error) error {
+	attempts, delay := b.o.RetryAttempts, b.o.RetryDelay
+	if attempts <= 0 {
+		attempts = defaultRetryAttempts
+	}
+	if delay < 0 {
+		delay = 0
+	} else if delay == 0 {
+		delay = defaultRetryDelay
+	}
+	id := n.ID
+	for i := 1; ; i++ {
+		final := i >= attempts
+		err := fn(ctx, final)
+		if err == nil || final || !retryable(ctx, err) {
+			if err != nil && i > 1 {
+				return fmt.Errorf("%w (após %d tentativas)", err, i)
+			}
+			if err == nil && i > 1 {
+				b.jc.Logf(&id, "✔ %s: concluído na tentativa %d de %d", n.Name, i, attempts)
+			}
+			return err
+		}
+		wait := delay * time.Duration(i)
+		b.jc.Logf(&id, "⟳ %s: tentativa %d de %d falhou: %v. Nova tentativa em %s; o próximo nó só é tocado depois deste.", n.Name, i, attempts, err, wait)
+		// Reconnect on the next attempt: the failure may have been a dropped session.
+		b.closeAll()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+func retryable(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, sshx.ErrSudoAuth) {
+		return false
+	}
+	var hk *sshx.HostKeyMismatchError
+	if errors.As(err, &hk) {
+		return false
+	}
+	var oe *remote.OpenError
+	if errors.As(err, &oe) && oe.Stage != remote.StageConnect {
+		return false
+	}
+	return true
 }
 
 func pause(n bootstrap.Node, err error) error {

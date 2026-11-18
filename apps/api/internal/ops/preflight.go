@@ -48,6 +48,11 @@ type Ops struct {
 	PollInterval time.Duration
 	// RebootTimeout bounds the wait for a rebooted node to answer SSH (default 15m).
 	RebootTimeout time.Duration
+	// RetryAttempts is how many times one node's rolling work is tried before
+	// the job pauses (default 3); RetryDelay × attempt is the wait between
+	// them (default 30s; negative means no wait, for tests).
+	RetryAttempts int
+	RetryDelay    time.Duration
 }
 
 // Runner is an open, validated session on a node.

@@ -40,6 +40,8 @@ export const LogConsole = forwardRef<LogConsoleHandle, { serverName?: (id: strin
   function LogConsole({ serverName, className }, ref) {
     const el = useRef<HTMLDivElement>(null);
     const term = useRef<Terminal | null>(null);
+    // Lines written before the terminal exists (handle attached in the same commit).
+    const pending = useRef<string[]>([]);
     const nameRef = useRef(serverName);
     nameRef.current = serverName;
     const { resolved } = useTheme();
@@ -59,6 +61,10 @@ export const LogConsole = forwardRef<LogConsoleHandle, { serverName?: (id: strin
       t.open(el.current!);
       fit.fit();
       term.current = t;
+      if (pending.current.length) {
+        t.write(pending.current.join(""));
+        pending.current = [];
+      }
       const ro = new ResizeObserver(() => fit.fit());
       ro.observe(el.current!);
       return () => {
@@ -78,8 +84,10 @@ export const LogConsole = forwardRef<LogConsoleHandle, { serverName?: (id: strin
 
     useImperativeHandle(ref, () => ({
       write(lines) {
-        if (!term.current || lines.length === 0) return;
-        term.current.write(lines.map((l) => render(l, nameRef.current)).join("\n") + "\n");
+        if (lines.length === 0) return;
+        const text = lines.map((l) => render(l, nameRef.current)).join("\n") + "\n";
+        if (term.current) term.current.write(text);
+        else pending.current.push(text);
       },
       clear() {
         term.current?.reset();
