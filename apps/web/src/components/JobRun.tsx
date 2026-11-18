@@ -16,6 +16,10 @@ const stateLabel = {
 } as const;
 
 /** Per-node stepper plus Xterm consoles (all nodes, or one node at a time) for a job. */
+// Absolutely positioned so the terminal never grows its own box (xterm would
+// otherwise feed its rows back into the height): the box follows the card.
+const FILL = "absolute inset-0 overflow-hidden rounded-lg border bg-[#fafafa] p-2 dark:bg-[#0b0d12]";
+
 export function JobRun({ jobId, names }: { jobId: string; names: Map<string, string> }) {
   const consoles = useRef(new Map<string, LogConsoleHandle | null>());
   const [tab, setTab] = useState<string>("all");
@@ -83,7 +87,8 @@ export function JobRun({ jobId, names }: { jobId: string; names: Map<string, str
             {stateLabel[state]}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        {/* The console stretches to the height of the steps card beside it. */}
+        <CardContent className="flex flex-1 flex-col gap-3">
           {nodeIds.length > 1 && (
             <div className="flex flex-wrap gap-1">
               {["all", ...nodeIds].map((id) => (
@@ -98,8 +103,8 @@ export function JobRun({ jobId, names }: { jobId: string; names: Map<string, str
             </div>
           )}
           {["all", ...nodeIds].map((id) => (
-            <div key={id} className={tab === id ? "" : "hidden"}>
-              <LogConsole ref={(h) => void consoles.current.set(id, h)} serverName={id === "all" ? nameOf : undefined} />
+            <div key={id} className={tab === id ? "relative min-h-[460px] flex-1" : "hidden"}>
+              <LogConsole ref={(h) => void consoles.current.set(id, h)} serverName={id === "all" ? nameOf : undefined} className={FILL} />
             </div>
           ))}
         </CardContent>

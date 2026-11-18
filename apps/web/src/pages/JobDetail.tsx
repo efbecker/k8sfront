@@ -111,8 +111,11 @@ export function JobDetailPage() {
               }
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <LogConsole ref={consoleRef} serverName={serverName} />
+          {/* The console stretches to the height of the steps card beside it. */}
+          <CardContent className="flex flex-1 flex-col">
+            <div className="relative min-h-[460px] flex-1">
+              <LogConsole ref={consoleRef} serverName={serverName} className={"absolute inset-0 overflow-hidden rounded-lg border bg-[#fafafa] p-2 dark:bg-[#0b0d12]"} />
+            </div>
           </CardContent>
         </Card>
       </div>
