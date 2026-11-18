@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, ServerCog, Stethoscope, Trash2 } from "lucide-react";
 import { api, type Server } from "@/lib/api";
 import { RemoveServerDialog } from "@/components/servers/RemoveServerDialog";
+import { PreflightDialog } from "@/components/servers/PreflightDialog";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
 import { CheckBadge, roleLabel, sudoLabel } from "@/components/status";
@@ -18,6 +19,7 @@ export function ServersPage() {
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [removing, setRemoving] = useState<Server>();
+  const [checking, setChecking] = useState<Server>();
   const servers = useQuery({ queryKey: ["servers"], queryFn: api.servers });
   const test = useMutation({
     mutationFn: (ids: string[]) => (ids.length === 1 ? api.preflight(ids[0]!) : api.preflightMany(ids)),
@@ -115,7 +117,14 @@ export function ServersPage() {
                       <div className="text-muted-foreground text-xs">{sudoLabel[s.sudoMode]}</div>
                     </TableCell>
                     <TableCell>
-                      <CheckBadge status={s.lastCheckStatus} />
+                      <button
+                        type="button"
+                        className="cursor-pointer rounded-md transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:outline-none"
+                        title="Ver os pré-requisitos e o que fazer"
+                        onClick={() => setChecking(s)}
+                      >
+                        <CheckBadge status={s.lastCheckStatus} />
+                      </button>
                       <div className="text-muted-foreground mt-0.5 text-xs">{formatDate(s.lastCheckAt)}</div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -133,6 +142,14 @@ export function ServersPage() {
           )}
         </CardContent>
       </Card>
+      {checking && (
+        <PreflightDialog
+          server={list.find((x) => x.id === checking.id) ?? checking}
+          open
+          onOpenChange={(v) => !v && setChecking(undefined)}
+          onTest={() => test.mutate([checking.id])}
+        />
+      )}
       {removing && <RemoveServerDialog server={removing} open onOpenChange={(o) => !o && setRemoving(undefined)} />}
       {adding && <ServerFormDialog open={adding} onOpenChange={setAdding} onSaved={(s) => navigate(`/servers/${s.id}`)} />}
     </>

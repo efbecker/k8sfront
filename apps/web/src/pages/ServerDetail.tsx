@@ -5,11 +5,12 @@ import { ArrowLeft, Fingerprint, KeyRound, Loader2, Pencil, RotateCcw, Stethosco
 import { api, ApiError, type PreflightReport } from "@/lib/api";
 import { duration, formatBytes, formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/layout/AppShell";
-import { CheckBadge, CheckIcon, JobStatusBadge, roleLabel, sudoLabel } from "@/components/status";
+import { CheckBadge, JobStatusBadge, roleLabel, sudoLabel } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RemoveServerDialog } from "@/components/servers/RemoveServerDialog";
+import { CheckList } from "@/components/servers/PreflightDialog";
 import { ServerFormDialog } from "./ServerForm";
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
@@ -21,21 +22,11 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
-export function ReportView({ report }: { report: PreflightReport }) {
+export function ReportView({ report, inCluster = false }: { report: PreflightReport; inCluster?: boolean }) {
   const f = report.facts;
   return (
     <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-      <ul className="divide-y rounded-lg border">
-        {report.checks.map((c) => (
-          <li key={c.id} className="flex items-start gap-3 p-3">
-            <CheckIcon status={c.status} />
-            <div className="min-w-0">
-              <div className="text-sm font-medium">{c.name}</div>
-              <div className="text-muted-foreground text-xs break-words">{c.detail}</div>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <CheckList checks={report.checks} inCluster={inCluster} />
       {f && (
         <div className="divide-y rounded-lg border px-3">
           <Row k="Hostname" v={f.hostname} />
@@ -167,7 +158,7 @@ export function ServerDetailPage() {
             <CardDescription>{formatDate(s.lastCheckReport.checkedAt)}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ReportView report={s.lastCheckReport} />
+            <ReportView report={s.lastCheckReport} inCluster={!!s.clusterId} />
           </CardContent>
         </Card>
       )}
