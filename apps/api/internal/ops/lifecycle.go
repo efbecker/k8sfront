@@ -172,18 +172,32 @@ func (b *bootstrapRun) resolveNames(ctx context.Context, nodes []bootstrap.Node)
 }
 
 // maintain runs the rolling maintenance of one node: cordon + drain (on the
-// primary) → action on the node → wait Ready → uncordon. Every phase is a
-// resumable step; the caller pauses the job on error (circuit breaker).
+// primary) → action on the node → wait Ready → uncordon. The caller pauses the
+// job on error (circuit breaker). If the action fails and the node is still
+// Ready (e.g. apt could not download a package and the old kubelet keeps
+// running), it is uncordoned so it does not sit idle while paused; that is
+// why the drain is not a StepOnce: Retomar drains it again before retrying.
 func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, prefix string, single bool, action func(ctx context.Context) error, version string) error {
 	p := b.primary()
+	id := n.ID
+	if done, err := b.jc.Completed(ctx, prefix+"uncordon", &id); err != nil {
+		return err
+	} else if done {
+		b.jc.Logf(&id, "⏭ %s: manutenção já concluída numa tentativa anterior", n.Name)
+		return nil
+	}
 	drainName := "cordon + drain (respeitando PDBs)"
 	if single {
 		drainName = "cordon"
 	}
-	if err := b.stepOn(ctx, n, p, prefix+"drain", drainName, func() string { return bootstrap.DrainScript(name, !single) }); err != nil {
+	if err := b.jc.Step(ctx, prefix+"drain", n.Name+": "+drainName, &id, func(ctx context.Context, st *store.JobStep) error {
+		_, err := b.on(ctx, st, p, n, bootstrap.DrainScript(name, !single))
+		return err
+	}); err != nil {
 		return err
 	}
 	if err := action(ctx); err != nil {
+		b.restore(ctx, n, name, prefix)
 		return err
 	}
 	waitName := "aguardar Ready"
@@ -191,9 +205,23 @@ func (b *bootstrapRun) maintain(ctx context.Context, n bootstrap.Node, name, pre
 		waitName = "aguardar Ready com kubelet " + version
 	}
 	if err := b.stepOn(ctx, n, p, prefix+"ready", waitName, func() string { return bootstrap.WaitNodeScript(name, version) }); err != nil {
+		b.restore(ctx, n, name, prefix)
 		return err
 	}
 	return b.stepOn(ctx, n, p, prefix+"uncordon", "uncordon", func() string { return bootstrap.UncordonScript(name) })
+}
+
+// restore puts a node whose maintenance failed back into service when it is
+// still Ready (best effort; a failure here never hides the original error).
+func (b *bootstrapRun) restore(ctx context.Context, n bootstrap.Node, name, prefix string) {
+	if ctx.Err() != nil {
+		return
+	}
+	id := n.ID
+	_ = b.jc.Step(ctx, prefix+"restore", n.Name+": devolver ao serviço se estiver Ready", &id, func(ctx context.Context, st *store.JobStep) error {
+		_, err := b.on(ctx, st, b.primary(), n, bootstrap.RestoreNodeScript(name))
+		return err
+	})
 }
 
 // rebootAndWait reboots the node, waits for SSH to come back with a new

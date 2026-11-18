@@ -45,7 +45,7 @@ var targetNode = regexp.MustCompile(`(?:node=|kubectl uncordon |kubectl delete n
 
 func lcClassify(script string) string {
 	markers := []struct{ marker, op string }{
-		{"K8SFRONT_REGISTRIES_SYNC", "registries"}, {"K8SFRONT_IMAGE_PRUNE", "prune"},
+		{"devolvido ao serviço", "restore"}, {"K8SFRONT_REGISTRIES_SYNC", "registries"}, {"K8SFRONT_IMAGE_PRUNE", "prune"},
 		{"K8SFRONT_APIPROXY_SYNC", "apiproxy"}, {"member remove", "etcd-member"},
 		{"APIs depreciadas", "precheck"}, {"snapshot save", "etcd-snapshot"}, {"pkgs.k8s.io/core:/stable", "repo"},
 		{"kubeadm upgrade apply", "kubeadm-apply"}, {"kubeadm upgrade node", "kubeadm-node"}, {"apt-mark unhold kubelet kubectl", "kubelet"},
@@ -58,7 +58,7 @@ func lcClassify(script string) string {
 	for _, m := range markers {
 		if strings.Contains(script, m.marker) {
 			op := m.op
-			if mm := targetNode.FindStringSubmatch(script); mm != nil && (op == "drain" || op == "wait" || op == "uncordon" || op == "etcd-snapshot" || op == "delete-node") {
+			if mm := targetNode.FindStringSubmatch(script); mm != nil && (op == "drain" || op == "restore" || op == "wait" || op == "uncordon" || op == "etcd-snapshot" || op == "delete-node") {
 				op += ">" + mm[1]
 			}
 			return op
@@ -214,9 +214,13 @@ func TestUpgradeOneNodeAtATimeWithCircuitBreaker(t *testing.T) {
 	if !strings.Contains(paused.Error, "w1") {
 		t.Fatalf("pause error should name the node: %q", paused.Error)
 	}
-	// Circuit breaker: w2 was not touched; w1 stays cordoned (no uncordon).
+	// Circuit breaker: w2 was not touched; w1 is not upgraded but goes back
+	// to service if still Ready (restore), never through the normal uncordon.
 	if f.count("w2:repo") != 0 || f.count("w2:kubeadm-node") != 0 || f.count("cp1:uncordon>k8s-w1") != 0 {
 		t.Fatalf("job continued past the failing node: %v", f.log)
+	}
+	if f.index("cp1:restore>k8s-w1") < f.index("w1:kubelet") {
+		t.Fatalf("failed node must be restored after the failure: %v", f.log)
 	}
 	// Primary: snapshot → kubeadm apply → drain → kubelet → Ready → uncordon, then w1.
 	seq := []string{"cp1:precheck", "cp1:etcd-snapshot>k8s-cp1", "cp1:repo", "cp1:kubeadm-apply", "cp1:drain>k8s-cp1", "cp1:kubelet",

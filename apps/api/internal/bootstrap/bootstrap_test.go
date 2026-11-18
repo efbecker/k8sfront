@@ -170,7 +170,7 @@ func TestScriptsAreValidBash(t *testing.T) {
 		"precheck": UpgradePrecheckScript(), "etcd-snapshot": EtcdSnapshotScript("cp1", "v1.38.1"),
 		"upgrade-apply": UpgradeKubeadmScript(s.Version, true), "upgrade-node": UpgradeKubeadmScript(s.Version, false),
 		"upgrade-kubelet": UpgradeKubeletScript(s.Version), "repo-for": RepoScriptFor(s.Version),
-		"drain": DrainScript("w1", true), "cordon": DrainScript("w1", false), "uncordon": UncordonScript("w1"),
+		"drain": DrainScript("w1", true), "cordon": DrainScript("w1", false), "uncordon": UncordonScript("w1"), "restore-node": RestoreNodeScript("w1"),
 		"wait-node": WaitNodeScript("w1", "v1.37.2"), "wait-kubelet": WaitKubeletScript(), "reboot": RebootScript(),
 		"os-check": OSCheckScript(), "os-upgrade": OSUpgradeScript(), "certs-check": CertsCheckScript(), "certs-renew": CertsRenewScript(),
 		"delete-node": DeleteNodeScript("w1"), "reset-node": ResetNodeScript(),

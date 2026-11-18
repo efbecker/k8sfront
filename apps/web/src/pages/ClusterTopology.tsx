@@ -16,7 +16,7 @@ const connLabel: Record<TopoConnState, { label: string; cls: string }> = {
   connecting: { label: "Conectando…", cls: "bg-warning" },
   reconnecting: { label: "Reconectando…", cls: "bg-warning" },
   live: { label: "Ao vivo", cls: "bg-success" },
-  error: { label: "API instável", cls: "bg-destructive" },
+  error: { label: "API instável", cls: "bg-warning" },
   closed: { label: "Desconectado", cls: "bg-muted-foreground" },
 };
 
@@ -227,7 +227,10 @@ export function ClusterTopologyPage() {
           </div>
         )}
         {conn.state === "error" && conn.message && (
-          <div className="border-destructive/40 bg-destructive/10 text-destructive mb-3 rounded-lg border px-3 py-2 text-sm">{conn.message}</div>
+          <div className="text-muted-foreground mb-3 flex items-center gap-2 truncate text-xs" title={conn.message}>
+            <span className="bg-warning size-1.5 shrink-0 rounded-full" />
+            <span className="truncate">{conn.message}</span>
+          </div>
         )}
 
         {!full && (

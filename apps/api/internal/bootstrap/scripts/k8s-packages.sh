@@ -5,6 +5,8 @@ if [ -z "$pkgver" ]; then
   exit 1
 fi
 log "Instalando kubelet, kubeadm e kubectl $pkgver"
+# Hold again even if the install fails (never leave them upgradable).
+trap 'apt-mark hold kubelet kubeadm kubectl >/dev/null 2>&1 || true' EXIT
 apt-mark unhold kubelet kubeadm kubectl >/dev/null 2>&1 || true
 apt_get install --allow-change-held-packages kubelet="$pkgver" kubeadm="$pkgver" kubectl="$pkgver" cri-tools
 apt-mark hold kubelet kubeadm kubectl

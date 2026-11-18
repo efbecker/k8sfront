@@ -4,7 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"reflect"
+	"regexp"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -255,7 +258,7 @@ func (t *Topology) healthLoop(ctx context.Context) {
 				return
 			}
 			if err != nil {
-				t.setStatus(ctx, StateError, "API do Kubernetes inacessível: "+err.Error())
+				t.setStatus(ctx, StateError, ReadyzMessage(err))
 			} else {
 				t.setStatus(ctx, StateLive, "")
 			}
@@ -481,4 +484,25 @@ func stripManagedFields(o any) (any, error) {
 		a.SetAnnotations(nil)
 	}
 	return o, nil
+}
+
+var failedCheck = regexp.MustCompile(`\[-\]([a-zA-Z0-9_./-]+) failed`)
+
+// ReadyzMessage turns a /readyz failure (a wall of "[+]check ok" lines) into
+// one short sentence naming only the failing checks.
+func ReadyzMessage(err error) string {
+	msg := err.Error()
+	var failed []string
+	for _, m := range failedCheck.FindAllStringSubmatch(msg, -1) {
+		if !slices.Contains(failed, m[1]) {
+			failed = append(failed, m[1])
+		}
+	}
+	if len(failed) > 0 {
+		return "API do Kubernetes respondendo com falhas (" + strings.Join(failed, ", ") + "); comum por alguns segundos durante upgrade ou reinício do control plane"
+	}
+	if len(msg) > 200 {
+		msg = msg[:200] + "…"
+	}
+	return "API do Kubernetes inacessível: " + msg
 }

@@ -55,6 +55,12 @@ func DrainScript(node string, drain bool) string {
 // UncordonScript (primary).
 func UncordonScript(node string) string { return render("uncordon", map[string]string{"Node": node}) }
 
+// RestoreNodeScript (primary) uncordons a node after a failed maintenance
+// action, but only if it is Ready (a broken node stays cordoned).
+func RestoreNodeScript(node string) string {
+	return render("restore-node", map[string]string{"Node": node})
+}
+
 // WaitNodeScript (primary) waits for Ready and, when version is set, for the
 // kubelet to report it.
 func WaitNodeScript(node, version string) string {

@@ -5,6 +5,8 @@ if [ -z "$pkgver" ]; then
   exit 1
 fi
 log "Atualizando kubelet e kubectl para $pkgver"
+# Hold again even if the install fails (never leave them upgradable).
+trap 'apt-mark hold kubelet kubectl >/dev/null 2>&1 || true' EXIT
 apt-mark unhold kubelet kubectl >/dev/null
 apt_get install --allow-change-held-packages kubelet="$pkgver" kubectl="$pkgver"
 apt-mark hold kubelet kubectl >/dev/null

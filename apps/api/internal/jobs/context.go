@@ -68,6 +68,21 @@ func (c *Context) StepOnce(ctx context.Context, key, name string, serverID *stri
 	return c.step(ctx, key, name, serverID, true, fn)
 }
 
+// Completed reports whether a previous attempt of this job already finished
+// key for serverID (what StepOnce would skip).
+func (c *Context) Completed(ctx context.Context, key string, serverID *string) (bool, error) {
+	prev, err := c.engine.st.ListSteps(ctx, c.Job.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range prev {
+		if p.Key == key && sameServer(p.ServerID, serverID) && p.Status == store.StepSucceeded {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func sameServer(a, b *string) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

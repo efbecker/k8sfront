@@ -34,8 +34,14 @@ func (s *Server) kubeCluster(w http.ResponseWriter, r *http.Request) (*kube.Clus
 
 // kubeError maps failures talking to the cluster to 502 (or 403 for RBAC).
 func (s *Server) kubeError(w http.ResponseWriter, err error) {
-	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+	if apierrors.IsForbidden(err) {
 		writeError(w, http.StatusForbidden, "forbidden", "a API do Kubernetes recusou a credencial: "+err.Error())
+		return
+	}
+	if apierrors.IsUnauthorized(err) {
+		// Seen for a few seconds while kube-apiserver restarts (upgrade,
+		// certificate renewal) before its authenticators are ready.
+		writeError(w, http.StatusBadGateway, "upstream", "a API do Kubernetes não aceitou a credencial agora (normal por alguns segundos enquanto o control plane reinicia; se persistir, verifique o kubeconfig do cluster)")
 		return
 	}
 	s.Log.Warn("kubernetes api", "err", err)

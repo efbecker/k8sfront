@@ -59,7 +59,7 @@ Variáveis de ambiente estão documentadas em `apps/api/internal/config/config.g
 6. **Host keys** são registradas no primeiro contato (TOFU) e verificadas sempre; divergência aborta com `HostKeyMismatchError`. Reset só por ação explícita do operador (auditada).
 7. **APT no Debian 13+:** sempre `DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"`, repositórios em formato moderno com chave em `/etc/apt/keyrings/` (`signed-by=`). **Nunca** `apt-key`.
 8. **Kubernetes:** `kubelet`, `kubeadm`, `kubectl` ficam em `apt-mark hold`; só o motor de upgrade faz `unhold` → instala versão exata → `hold` de novo. Nunca pular minor versions (version skew policy).
-9. **Rolling operations:** um nó por vez, `cordon` → `drain` respeitando PDBs → ação → aguardar `Ready` → `uncordon`. Falha ou timeout pausa o job (`jobs.Pause`) antes de tocar no próximo nó (circuit breaker).
+9. **Rolling operations:** um nó por vez, `cordon` → `drain` respeitando PDBs → ação → aguardar `Ready` → `uncordon`. Falha ou timeout pausa o job (`jobs.Pause`) antes de tocar no próximo nó (circuit breaker). Se a ação falhar e o nó continuar `Ready`, ele volta ao serviço (`restore-node.sh`) e o Retomar refaz o drain antes de tentar de novo; pacotes do Kubernetes voltam a `hold` mesmo quando o `apt-get` falha (trap EXIT).
 10. Toda ação administrativa relevante grava em `audit_log` (sem segredos).
 
 ## Testes

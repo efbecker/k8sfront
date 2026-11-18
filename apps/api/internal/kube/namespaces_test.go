@@ -2,6 +2,8 @@ package kube
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -52,5 +54,16 @@ func TestNamespaceInventory(t *testing.T) {
 	one, err := NamespaceInventory(context.Background(), cs, nil, "empty")
 	if err != nil || len(one) != 1 || one[0].Name != "empty" {
 		t.Fatalf("single: %+v %v", one, err)
+	}
+}
+
+func TestReadyzMessage(t *testing.T) {
+	raw := errors.New(`an error on the server ("[+]ping ok\n[-]etcd failed: reason withheld\n[-]etcd-readiness failed: reason withheld\n[+]log ok\nreadyz check failed") has prevented the request from succeeding`)
+	got := ReadyzMessage(raw)
+	if !strings.Contains(got, "(etcd, etcd-readiness)") || strings.Contains(got, "ping") {
+		t.Fatalf("got %q", got)
+	}
+	if got := ReadyzMessage(errors.New("dial tcp 10.0.0.1:6443: connect: connection refused")); !strings.Contains(got, "connection refused") {
+		t.Fatalf("got %q", got)
 	}
 }

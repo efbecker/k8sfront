@@ -8,6 +8,8 @@ fi
 cur=$(kubeadm version -o short 2>/dev/null || true)
 if [ "$cur" != "$ver" ]; then
   log "Atualizando kubeadm ${cur:-?} → $pkgver"
+  # Hold again even if the install fails (never leave them upgradable).
+  trap 'apt-mark hold kubeadm >/dev/null 2>&1 || true' EXIT
   apt-mark unhold kubeadm >/dev/null
   apt_get install --allow-change-held-packages kubeadm="$pkgver"
   apt-mark hold kubeadm >/dev/null

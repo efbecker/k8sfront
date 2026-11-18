@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  ApiError,
   endpointMode,
   isFinal,
   jobKindLabel,
@@ -381,13 +382,14 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
                   </TableCell>
                   <TableCell className="text-xs">{n.containerRuntime}</TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
+                    {/* Fixed-width slots keep the buttons aligned across rows. */}
+                    <div className="flex items-center justify-end gap-1">
                       {n.unschedulable ? (
-                        <Button size="sm" variant="ghost" onClick={() => uncordon.mutate(n.name)} disabled={uncordon.isPending}>
+                        <Button size="sm" variant="ghost" className="w-28 justify-start" onClick={() => uncordon.mutate(n.name)} disabled={uncordon.isPending}>
                           <Play /> Uncordon
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" onClick={() => cordon.mutate(n.name)} disabled={cordon.isPending}>
+                        <Button size="sm" variant="ghost" className="w-28 justify-start" onClick={() => cordon.mutate(n.name)} disabled={cordon.isPending}>
                           <CircleSlash /> Cordon
                         </Button>
                       )}
@@ -400,6 +402,7 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
                       >
                         <Waves /> Drain
                       </ConfirmButton>
+                      <div className="flex w-9 justify-center">
                       {srv && (!n.controlPlane || cpCount > 1) && (
                         <ConfirmButton
                           variant="ghost"
@@ -412,6 +415,7 @@ function NodesCard({ id, plan, members, cluster }: { id: string; plan: UpgradePl
                           <Trash2 />
                         </ConfirmButton>
                       )}
+                      </div>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -712,33 +716,58 @@ function safePlan(p: UpgradePlan): UpgradePlan {
   return { ...p, nodes: p.nodes ?? [], checks: p.checks ?? [], targets: (p.targets ?? []).map((t) => ({ ...t, hops: t.hops ?? [] })) };
 }
 
+/**
+ * Shown while the cluster API does not answer (e.g. kube-apiserver restarting
+ * during an upgrade): the page keeps the last data it had instead of vanishing.
+ */
+function ApiUnavailable({ error, running, stale }: { error: unknown; running?: Job; stale: boolean }) {
+  return (
+    <div className="border-warning/40 bg-warning/10 rounded-lg border px-4 py-3 text-sm">
+      <div className="font-medium">A API do Kubernetes não respondeu agora; tentando de novo automaticamente.</div>
+      <div className="text-muted-foreground mt-0.5 text-xs">
+        {running
+          ? `É esperado por alguns instantes enquanto "${jobKindLabel[running.kind] ?? running.kind}" reinicia componentes do cluster. `
+          : ""}
+        {stale ? "Os dados abaixo são da última leitura. " : ""}
+        <span className="opacity-80">Detalhe: {error instanceof Error ? error.message : String(error)}</span>
+      </div>
+      {running && (
+        <div className="mt-2">
+          <JobLink job={running} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ClusterLifecyclePage() {
   const { id = "" } = useParams();
   const jobs = useClusterJobs(id);
-  const anyRunning = (jobs.data ?? []).some((j) => !isFinal(j.status) && lifecycleKinds.has(j.kind));
-  const plan = useQuery({ queryKey: ["upgradePlan", id], queryFn: () => api.upgradePlan(id), refetchInterval: anyRunning ? 5_000 : 30_000 });
+  const running = (jobs.data ?? []).find((j) => !isFinal(j.status) && lifecycleKinds.has(j.kind));
+  const plan = useQuery({ queryKey: ["upgradePlan", id], queryFn: () => api.upgradePlan(id), refetchInterval: running ? 5_000 : 30_000, retry: 1 });
   const cluster = useQuery({ queryKey: ["cluster", id], queryFn: () => api.cluster(id) });
   const members = useMemo(() => cluster.data?.nodes ?? [], [cluster.data]);
+  const p = plan.data ? safePlan(plan.data) : undefined;
+  const notReady = plan.error instanceof ApiError && plan.error.code === "not_ready";
 
   return (
     <>
       <ClusterHeader id={id} />
       {plan.isLoading ? (
         <Loader2 className="text-muted-foreground animate-spin" />
-      ) : plan.error ? (
+      ) : notReady ? (
         <KubeError error={plan.error} />
       ) : (
-        plan.data && (
-          <div className="space-y-6">
-            <UpgradeCard id={id} plan={safePlan(plan.data)} jobs={jobs.data ?? []} />
-            <NodesCard id={id} plan={safePlan(plan.data)} members={members} cluster={cluster.data} />
-            <div className="grid gap-6 2xl:grid-cols-2">
-              <OSCard id={id} jobs={jobs.data} members={members} />
-              <CertsCard id={id} jobs={jobs.data} />
-            </div>
-            <HistoryCard jobs={jobs.data} />
+        <div className="space-y-6">
+          {plan.error && <ApiUnavailable error={plan.error} running={running} stale={!!p} />}
+          {p && <UpgradeCard id={id} plan={p} jobs={jobs.data ?? []} />}
+          {p && <NodesCard id={id} plan={p} members={members} cluster={cluster.data} />}
+          <div className="grid gap-6 2xl:grid-cols-2">
+            <OSCard id={id} jobs={jobs.data} members={members} />
+            <CertsCard id={id} jobs={jobs.data} />
           </div>
-        )
+          <HistoryCard jobs={jobs.data} />
+        </div>
       )}
     </>
   );
