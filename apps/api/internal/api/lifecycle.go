@@ -70,6 +70,8 @@ type upgradePlan struct {
 	Targets        []upgrade.Target      `json:"targets"`
 	Blocked        bool                  `json:"blocked"`
 	PausedJob      *store.Job            `json:"pausedJob,omitempty"`
+	// InProgress: an upgrade job is queued or running (blocks a new one).
+	InProgress bool `json:"inProgress,omitempty"`
 }
 
 func (s *Server) buildPlan(ctx context.Context, w http.ResponseWriter, r *http.Request) (*upgradePlan, bool) {
@@ -107,12 +109,14 @@ func (s *Server) buildPlan(ctx context.Context, w http.ResponseWriter, r *http.R
 	for i := range list {
 		if list[i].Kind == ops.KindUpgrade {
 			plan.PausedJob = &list[i]
-			status := "fail"
-			detail := "Há um upgrade em andamento"
 			if list[i].Status == store.JobPaused || list[i].Status == store.JobFailed {
-				detail = "Há um upgrade interrompido: retome-o (as etapas concluídas são puladas) ou cancele-o antes de planejar outro"
+				plan.Checks = append(plan.Checks, upgrade.Check{ID: "pending-upgrade", Name: "Upgrade anterior", Status: "fail",
+					Detail: "Há um upgrade interrompido: retome-o (as etapas concluídas são puladas) ou cancele-o antes de planejar outro"})
+			} else {
+				// Not a failed pre-check: the UI shows it as "in progress".
+				plan.InProgress = true
+				plan.Blocked = true
 			}
-			plan.Checks = append(plan.Checks, upgrade.Check{ID: "pending-upgrade", Name: "Upgrade anterior", Status: status, Detail: detail})
 			break
 		}
 	}

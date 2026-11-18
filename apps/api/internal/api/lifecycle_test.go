@@ -87,8 +87,13 @@ func TestUpgradeAndLifecycleAPI(t *testing.T) {
 	if code := call(t, ts, "POST", "/api/v1/clusters/c1/rolling-reboot", map[string]any{}, &e); code != 409 {
 		t.Fatalf("concurrent maintenance: %d %+v", code, e)
 	}
-	if code := call(t, ts, "GET", "/api/v1/clusters/c1/upgrades/plan", nil, &plan); code != 200 || !plan.Blocked || plan.PausedJob == nil {
+	if code := call(t, ts, "GET", "/api/v1/clusters/c1/upgrades/plan", nil, &plan); code != 200 || !plan.Blocked || plan.PausedJob == nil || !plan.InProgress {
 		t.Fatalf("plan with pending upgrade must be blocked: %+v", plan)
+	}
+	for _, c := range plan.Checks {
+		if c.Status == "fail" {
+			t.Fatalf("an upgrade in progress is not a failed pre-check: %+v", c)
+		}
 	}
 	s.Engine.Cancel(context.Background(), job.ID)
 

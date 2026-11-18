@@ -454,6 +454,7 @@ export interface UpgradePlan {
   targets: UpgradeTarget[];
   blocked: boolean;
   pausedJob?: Job;
+  inProgress?: boolean;
 }
 
 export interface OSPackage {

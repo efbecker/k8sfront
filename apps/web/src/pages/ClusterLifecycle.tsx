@@ -105,10 +105,20 @@ function UpgradeCard({ id, plan, jobs }: { id: string; plan: UpgradePlan; jobs?:
         </div>
 
         {paused && (
-          <div className="border-warning/50 bg-warning/10 flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm">
-            <Pause className="text-warning size-4" />
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm",
+              plan.inProgress ? "border-primary/40 bg-primary/5" : "border-warning/50 bg-warning/10",
+            )}
+          >
+            {plan.inProgress ? <Loader2 className="text-primary size-4 animate-spin" /> : <Pause className="text-warning size-4" />}
             <span>
-              Upgrade <JobStatusBadge status={paused.status} /> {paused.error && <span className="text-muted-foreground">— {paused.error}</span>}
+              Upgrade <JobStatusBadge status={paused.status} />{" "}
+              {plan.inProgress ? (
+                <span className="text-muted-foreground">— um nó por vez; acompanhe no console</span>
+              ) : (
+                paused.error && <span className="text-muted-foreground">— {paused.error}</span>
+              )}
             </span>
             <div className="ml-auto flex gap-2">
               <Button size="sm" variant="outline" asChild>
@@ -193,11 +203,18 @@ function UpgradeCard({ id, plan, jobs }: { id: string; plan: UpgradePlan; jobs?:
                 >
                   {start.isPending ? <Loader2 className="animate-spin" /> : <Play />} Iniciar upgrade
                 </ConfirmButton>
-                {plan.blocked && <span className="text-destructive text-xs">Resolva as pré-checagens com falha.</span>}
+                {plan.blocked &&
+                  (plan.inProgress ? (
+                    <span className="text-muted-foreground text-xs">Já existe um upgrade em andamento; acompanhe pelo console acima.</span>
+                  ) : paused ? (
+                    <span className="text-warning text-xs">Retome ou aborte o upgrade interrompido acima antes de iniciar outro.</span>
+                  ) : (
+                    <span className="text-destructive text-xs">Resolva as pré-checagens com falha.</span>
+                  ))}
               </div>
             )}
             <ErrorText error={start.error} />
-            {start.data && <div className="mt-2"><JobLink job={start.data} /></div>}
+            {start.data && !paused && <div className="mt-2"><JobLink job={start.data} /></div>}
           </div>
         </div>
       </CardContent>
