@@ -51,7 +51,8 @@ const (
 	SecretSSHPassword   SecretKind = "ssh_password"
 	SecretSudoPassword  SecretKind = "sudo_password"
 	SecretKubeconfig    SecretKind = "kubeconfig"
-	SecretHelmValues    SecretKind = "helm_values" // values of a pending Helm job (deleted when it succeeds)
+	SecretHelmValues    SecretKind = "helm_values"       // values of a pending Helm job (deleted when it succeeds)
+	SecretRegistryAuth  SecretKind = "registry_password" // password or token of a container registry
 )
 
 // Secret is an encrypted blob. Plaintext never lives in this struct.
@@ -114,6 +115,40 @@ type Cluster struct {
 	KubeconfigSecretID   *string         `json:"-"`
 	CreatedAt            time.Time       `json:"createdAt"`
 	UpdatedAt            time.Time       `json:"updatedAt"`
+}
+
+// Registry is a container registry (or a mirror in front of one) known to the
+// platform. Node configuration (containerd hosts.toml) uses Host, Endpoint,
+// Mirrors, CACert and SkipVerify; credentials become imagePullSecrets.
+type Registry struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Kind             string    `json:"kind"`     // dockerhub | ghcr | quay | harbor | generic
+	Host             string    `json:"host"`     // name used in image references (docker.io, ghcr.io, registry:5000)
+	Endpoint         string    `json:"endpoint"` // upstream URL (https://registry-1.docker.io)
+	Mirrors          []string  `json:"mirrors"`  // URLs tried before Endpoint (pull/resolve only)
+	Username         string    `json:"username"`
+	PasswordSecretID *string   `json:"-"`
+	CACert           string    `json:"caCert"`
+	SkipVerify       bool      `json:"skipVerify"`
+	PullSecret       bool      `json:"pullSecret"` // create imagePullSecrets in the clusters
+	Namespaces       []string  `json:"namespaces"` // empty: every non-system namespace
+	ClusterIDs       []string  `json:"clusterIds"` // empty: every managed cluster
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+// AppliesTo reports whether the registry targets the cluster.
+func (r *Registry) AppliesTo(clusterID string) bool {
+	if len(r.ClusterIDs) == 0 {
+		return true
+	}
+	for _, id := range r.ClusterIDs {
+		if id == clusterID {
+			return true
+		}
+	}
+	return false
 }
 
 // Cluster lifecycle states.
@@ -251,6 +286,13 @@ type Store interface {
 	// servers are detached (cluster_id set to NULL), not deleted.
 	DeleteCluster(ctx context.Context, id string) error
 	ListClusterServers(ctx context.Context, clusterID string) ([]Server, error)
+
+	CreateRegistry(ctx context.Context, r *Registry) error
+	UpdateRegistry(ctx context.Context, r *Registry) error
+	GetRegistry(ctx context.Context, id string) (*Registry, error)
+	ListRegistries(ctx context.Context) ([]Registry, error)
+	// DeleteRegistry removes the registry and its password secret.
+	DeleteRegistry(ctx context.Context, id string) error
 
 	CreateJob(ctx context.Context, j *Job) error
 	GetJob(ctx context.Context, id string) (*Job, error)

@@ -179,6 +179,10 @@ func TestScriptsAreValidBash(t *testing.T) {
 		"helm-install":   HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "nginx", Repo: "https://charts.example.com", Version: "1.2.3", Values: "replicaCount: 2\n"}),
 		"helm-oci":       HelmScript(HelmRequest{Action: HelmInstall, Release: "web", Namespace: "apps", Chart: "oci://registry.example.com/charts/web"}),
 		"helm-uninstall": HelmScript(HelmRequest{Action: HelmUninstall, Release: "web", Namespace: "apps"}),
+		"registries": RegistriesScript([]RegistryHost{{Dir: "docker.io", TOML: "server = \"https://registry-1.docker.io\"\n"},
+			{Dir: "r.example.com:5000", TOML: "server = \"https://r.example.com:5000\"\n", CA: "-----BEGIN CERTIFICATE-----\nAA\n-----END CERTIFICATE-----\n"}}),
+		"registries-empty": RegistriesScript(nil),
+		"image-prune":      ImagePruneScript(),
 	}
 	for name, body := range scripts {
 		cmd := exec.Command("bash", "-n")

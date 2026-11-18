@@ -38,6 +38,8 @@ type Ops struct {
 	Store     store.Store
 	Connector *remote.Connector
 	Secrets   *secrets.Manager
+	// Kube reaches the Kubernetes API of a cluster (pull secrets, pre-pull).
+	Kube KubeClients
 	// Open overrides how node sessions are opened (tests); defaults to Connector.Open.
 	Open func(ctx context.Context, s *store.Server, hooks remote.Hooks) (Runner, error)
 	// ReadyTimeout bounds the final wait for all nodes to be Ready (default 15m).
@@ -79,6 +81,9 @@ func (o *Ops) Register(e *jobs.Engine) {
 	e.Register(KindRollingReboot, o.rollingReboot)
 	e.Register(KindCerts, o.certs)
 	e.Register(KindHelm, o.helm)
+	e.Register(KindRegistriesSync, o.registriesSync)
+	e.Register(KindImagePrepull, o.imagePrepull)
+	e.Register(KindImagePrune, o.imagePrune)
 }
 
 func (o *Ops) preflight(ctx context.Context, jc *jobs.Context) error {

@@ -23,6 +23,9 @@ func TestPatterns(t *testing.T) {
 		"--certificate-key " + strings.Repeat("a1", 32):                                                      strings.Repeat("a1", 32),
 		"Authorization: Bearer eyJhbGciOi":                                                                   "eyJhbGciOi",
 		"-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----":                       "AAAA",
+		`{"auths":{"ghcr.io":{"username":"ci","password":"ghp_regpass","auth":"Y2k6Z2hwX3JlZ3Bhc3M="}}}`:     "ghp_regpass",
+		`{"auths":{"ghcr.io":{"auth":"Y2k6Z2hwX3JlZ3Bhc3M="}}}`:                                              "Y2k6Z2hwX3JlZ3Bhc3M=",
+		`  .dockerconfigjson: eyJhdXRocyI6e319Cg==`:                                                          "eyJhdXRocyI6e319Cg==",
 	}
 	for in, secret := range cases {
 		if out := r.String(in); strings.Contains(out, secret) {

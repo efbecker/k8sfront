@@ -79,15 +79,15 @@ func run() error {
 	}
 	conn := &remote.Connector{Store: db, Secrets: sec, Dialer: dialer}
 
+	kubeMgr := kube.NewManager(db, sec, logger)
+	defer kubeMgr.Close()
+
 	hub := jobs.NewHub(db, logger)
 	engine := jobs.New(db, hub, logger, cfg.Workers)
-	(&ops.Ops{Store: db, Connector: conn, Secrets: sec}).Register(engine)
+	(&ops.Ops{Store: db, Connector: conn, Secrets: sec, Kube: kubeMgr}).Register(engine)
 	if err := engine.Start(ctx); err != nil {
 		return fmt.Errorf("start job engine: %w", err)
 	}
-
-	kubeMgr := kube.NewManager(db, sec, logger)
-	defer kubeMgr.Close()
 
 	srv := &api.Server{
 		Store: db, Secrets: sec, Engine: engine, Connector: conn, Log: logger,

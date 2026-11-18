@@ -81,6 +81,9 @@ Fase 2 adicionou `internal/bootstrap` (spec, configs kubeadm v1beta4, scripts em
 Fase 3 adicionou `internal/kube` (client-go). Fase 4 adicionou `internal/deploy` (formulário → manifests, parse de YAML, server-side apply, releases Helm por metadados).
 Fase 5 adicionou `internal/upgrade` (plano de versões e pré-checagens), `internal/ospatch` (parse do estado do APT) e os jobs de lifecycle em `internal/ops`
 (scripts em `internal/bootstrap/scripts/`, renderizados por `internal/bootstrap/lifecycle.go`).
+Registries & Imagens adicionou `internal/registry` (presets, validação, parse de referências de imagem, `hosts.toml`,
+dockerconfigjson e teste de credenciais), `internal/kube/registries.go` (imagePullSecrets, catálogo e pré-pull) e
+`internal/ops/registries.go` (jobs `cluster.registries-sync`, `cluster.image-prepull`, `cluster.image-prune`).
 
 ---
 
@@ -93,7 +96,7 @@ então uma implementação PostgreSQL só precisa satisfazer a interface e porta
 
 Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e registradas em `schema_migrations`.
 
-### Tabelas (0001_init.sql + 0002_cluster_options.sql)
+### Tabelas (0001_init.sql + 0002_cluster_options.sql + 0003_registries.sql)
 
 | Tabela | Finalidade | Colunas principais |
 | --- | --- | --- |
@@ -105,6 +108,7 @@ Migrations: `internal/store/sqlite/migrations/NNNN_*.sql`, aplicadas em ordem e 
 | `job_steps` | progresso por etapa/nó | `job_id`, `seq`, `key`, `name`, `server_id`, `status`, `error`, timestamps |
 | `job_logs` | saída redigida | PK `(job_id, seq)`, `ts`, `stream` (stdout/stderr/system), `step_id`, `server_id`, `line` |
 | `audit_log` | trilha de auditoria | `ts`, `actor`, `action`, `target_type`, `target_id`, `details` (JSON sem segredos), `remote_addr` |
+| `registries` | registries de imagens e mirrors | `name`, `kind` (dockerhub/ghcr/quay/harbor/generic), `host` (UNIQUE, como aparece nas imagens), `endpoint`, `mirrors` (JSON), `username`, `password_secret_id` (`registry_password` no cofre), `ca_cert` (PEM público), `skip_verify`, `pull_secret`, `namespaces` (JSON, vazio = todos menos os de sistema), `cluster_ids` (JSON, vazio = todos) |
 
 Ao remover um servidor, seus segredos são apagados na mesma transação.
 
@@ -310,6 +314,31 @@ sha256 verificado), e não via SDK Go, para não trazer a árvore de dependênci
 | POST | `/clusters/{id}/certs` | `{action: check\|renew}` → `cluster.certs` |
 
 Jobs de manutenção que alteram o cluster (upgrade, nós, SO, reboot, renovação) são exclusivos: 409 se outro estiver pendente/rodando.
+
+### Endpoints (Registries & Imagens)
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET · POST | `/registries` | listar · cadastrar (Docker Hub, GHCR e Quay têm host/endpoint fixos; Harbor e genérico pedem o host). A senha/token vai para o cofre; a resposta só traz `hasPassword` |
+| GET · PATCH · DELETE | `/registries/{id}` | detalhar · editar (`password` troca e apaga o segredo antigo, `clearPassword`) · remover (apaga o segredo junto) |
+| POST | `/registries/{id}/check` | `GET /v2/` no endpoint; responde a desafios Bearer (servidor de token) ou Basic com as credenciais guardadas e devolve só ok/mensagem |
+| POST | `/clusters/{id}/registries/sync` | job `cluster.registries-sync` (exclusivo): nó a nó, grava `/etc/containerd/certs.d/<host>/hosts.toml` (+ `ca.crt`), remove diretórios que o k8sfront criou para registries que não existem mais e liga `config_path` no containerd 1.7 (reinicia o containerd só nessa primeira vez; containers seguem rodando). Falha pausa antes do próximo nó. Depois reconcilia os imagePullSecrets |
+| GET | `/clusters/{id}/k8s/images` | catálogo: pods (o que roda, por workload) + `node.status.images` (onde está em cache e tamanho; o kubelet lista só as 50 maiores por nó) |
+| POST | `/clusters/{id}/images/prepull` | `{images}` (até 20) → job `cluster.image-prepull` |
+| POST | `/clusters/{id}/images/prune` | `{serverIds?}` → job `cluster.image-prune` (`crictl rmi --prune` em paralelo) |
+
+- **imagePullSecrets:** para cada registry com usuário, senha e `pull_secret`, o Secret `k8sfront-registry-<nome>`
+  (`kubernetes.io/dockerconfigjson`, labels `app.kubernetes.io/managed-by=k8sfront` e `k8sfront.io/registry=<id>`) é
+  criado em cada namespace alvo e adicionado à ServiceAccount `default`. Secrets com esses labels que não são mais
+  desejados saem (listados só por metadados). Credenciais nunca vão para os nós: nada de `crictl --creds` em argv.
+- **Central de Deploy:** o formulário aceita `pullSecret.registryId` e, sem pull secret, escolhe sozinho o registry
+  cujo host bate com o da imagem. O Secret compartilhado nunca é excluído junto com o app. Depois de um apply
+  (formulário ou YAML) os namespaces tocados recebem os pull secrets; no YAML, namespaces que já existem recebem antes.
+- **Pré-pull:** DaemonSet temporário em `k8sfront-system` (tolera todos os taints, requests mínimos), um container por
+  imagem com comando inexistente (`/k8sfront-prepull-noop`): o kubelet baixa a imagem com os imagePullSecrets e o
+  entrypoint da imagem nunca roda. O job acompanha o estado de cada container por nó (pull ok, erro de pull ou pendente,
+  timeout de 15 min) e remove o DaemonSet no fim.
+- Clusters novos já saem do bootstrap com `config_path = '/etc/containerd/certs.d'` (script `containerd`).
 
 ### Endpoints previstos
 - _(Fase 3)_ configmaps, secrets mascarados, WS de logs de pod (`follow`) e WS de `exec` (terminal interativo).

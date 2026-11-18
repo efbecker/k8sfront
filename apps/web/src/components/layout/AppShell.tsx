@@ -13,6 +13,8 @@ import {
   Server,
   ScrollText,
   Share2,
+  Layers,
+  Warehouse,
   Loader2,
   type LucideIcon,
 } from "lucide-react";
@@ -38,6 +40,7 @@ const nav: { title: string; items: NavItem[] }[] = [
     items: [
       { to: "/clusters", label: "Clusters", icon: Boxes },
       { to: "/servers", label: "Servidores", icon: Server },
+      { to: "/registries", label: "Registries", icon: Warehouse },
       { to: "/jobs", label: "Operações", icon: ClipboardList },
       { to: "/audit", label: "Auditoria", icon: ScrollText },
     ],
@@ -51,6 +54,7 @@ const nav: { title: string; items: NavItem[] }[] = [
       { to: "/workloads", label: "Workloads", icon: Container, clusterPage: "workloads" },
       { to: "/network", label: "Rede & Storage", icon: Network, clusterPage: "network" },
       { to: "/deploy", label: "Central de Deploy", icon: PackagePlus, clusterPage: "deploy" },
+      { to: "/images", label: "Imagens", icon: Layers, clusterPage: "images" },
       { to: "/lifecycle", label: "Updates & Lifecycle", icon: RefreshCcw, clusterPage: "lifecycle" },
     ],
   },

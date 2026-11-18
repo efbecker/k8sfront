@@ -45,6 +45,7 @@ var targetNode = regexp.MustCompile(`(?:node=|kubectl uncordon |kubectl delete n
 
 func lcClassify(script string) string {
 	markers := []struct{ marker, op string }{
+		{"K8SFRONT_REGISTRIES_SYNC", "registries"}, {"K8SFRONT_IMAGE_PRUNE", "prune"},
 		{"K8SFRONT_APIPROXY_SYNC", "apiproxy"}, {"member remove", "etcd-member"},
 		{"APIs depreciadas", "precheck"}, {"snapshot save", "etcd-snapshot"}, {"pkgs.k8s.io/core:/stable", "repo"},
 		{"kubeadm upgrade apply", "kubeadm-apply"}, {"kubeadm upgrade node", "kubeadm-node"}, {"apt-mark unhold kubelet kubectl", "kubelet"},
@@ -92,6 +93,8 @@ func (r *lcRunner) Run(ctx context.Context, script string, opts sshx.RunOptions,
 		return &sshx.Result{Stdout: "yes\n"}, nil
 	case "read-ca":
 		return &sshx.Result{Stdout: f.ca}, nil
+	case "prune":
+		return &sshx.Result{Stdout: "K8SFRONT_PRUNE removed=3 remaining=7 freed=1048576\n"}, nil
 	}
 	return &sshx.Result{}, nil
 }
@@ -135,6 +138,15 @@ func newLifecycleEnvWith(t *testing.T, f *lcFake, nodes []struct {
 	role store.NodeRole
 }, options string) (*sqlite.DB, *jobs.Engine) {
 	t.Helper()
+	db, engine, _ := newLifecycleEnvKube(t, f, nodes, options, nil)
+	return db, engine
+}
+
+func newLifecycleEnvKube(t *testing.T, f *lcFake, nodes []struct {
+	name string
+	role store.NodeRole
+}, options string, kubeClients KubeClients) (*sqlite.DB, *jobs.Engine, *secrets.Manager) {
+	t.Helper()
 	ctx := context.Background()
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
@@ -165,7 +177,7 @@ func newLifecycleEnvWith(t *testing.T, f *lcFake, nodes []struct {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	engine := jobs.New(db, jobs.NewHub(db, logger), logger, 2)
-	o := &Ops{Store: db, Secrets: sec, PollInterval: 5 * time.Millisecond, RebootTimeout: 5 * time.Second,
+	o := &Ops{Store: db, Secrets: sec, Kube: kubeClients, PollInterval: 5 * time.Millisecond, RebootTimeout: 5 * time.Second,
 		Open: func(_ context.Context, s *store.Server, _ remote.Hooks) (Runner, error) {
 			return &lcRunner{f: f, node: s.Name}, nil
 		}}
@@ -178,7 +190,7 @@ func newLifecycleEnvWith(t *testing.T, f *lcFake, nodes []struct {
 		defer cancel()
 		engine.Shutdown(sctx)
 	})
-	return db, engine
+	return db, engine, sec
 }
 
 var threeNodes = []struct {

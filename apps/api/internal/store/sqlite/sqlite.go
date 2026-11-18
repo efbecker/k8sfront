@@ -745,3 +745,119 @@ func (d *DB) ListAudit(ctx context.Context, limit int) ([]store.AuditEntry, erro
 	}
 	return out, rows.Err()
 }
+
+// --- registries ----------------------------------------------------------------
+
+const registryCols = `id, name, kind, host, endpoint, mirrors, username, password_secret_id, ca_cert,
+	skip_verify, pull_secret, namespaces, cluster_ids, created_at, updated_at`
+
+func jsonList(v []string) string {
+	if v == nil {
+		v = []string{}
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func parseList(s string) []string {
+	out := []string{}
+	_ = json.Unmarshal([]byte(s), &out)
+	return out
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func scanRegistry(r scanner) (*store.Registry, error) {
+	var g store.Registry
+	var pw sql.NullString
+	var mirrors, nss, cids, created, updated string
+	var skip, pull int
+	if err := r.Scan(&g.ID, &g.Name, &g.Kind, &g.Host, &g.Endpoint, &mirrors, &g.Username, &pw, &g.CACert,
+		&skip, &pull, &nss, &cids, &created, &updated); err != nil {
+		return nil, err
+	}
+	g.PasswordSecretID = strPtr(pw)
+	g.Mirrors, g.Namespaces, g.ClusterIDs = parseList(mirrors), parseList(nss), parseList(cids)
+	g.SkipVerify, g.PullSecret = skip != 0, pull != 0
+	g.CreatedAt, g.UpdatedAt = parseTS(created), parseTS(updated)
+	return &g, nil
+}
+
+func registryConflict(err error, g *store.Registry) error {
+	if isUnique(err) {
+		return fmt.Errorf("%w: já existe um registry com o nome %q ou o host %q", store.ErrConflict, g.Name, g.Host)
+	}
+	return err
+}
+
+func (d *DB) CreateRegistry(ctx context.Context, g *store.Registry) error {
+	now := time.Now()
+	g.CreatedAt, g.UpdatedAt = now, now
+	_, err := d.db.ExecContext(ctx, `INSERT INTO registries(`+registryCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		g.ID, g.Name, g.Kind, g.Host, g.Endpoint, jsonList(g.Mirrors), g.Username, g.PasswordSecretID, g.CACert,
+		boolInt(g.SkipVerify), boolInt(g.PullSecret), jsonList(g.Namespaces), jsonList(g.ClusterIDs), ts(g.CreatedAt), ts(g.UpdatedAt))
+	return registryConflict(err, g)
+}
+
+func (d *DB) UpdateRegistry(ctx context.Context, g *store.Registry) error {
+	g.UpdatedAt = time.Now()
+	res, err := d.db.ExecContext(ctx, `UPDATE registries SET name=?, kind=?, host=?, endpoint=?, mirrors=?, username=?,
+		password_secret_id=?, ca_cert=?, skip_verify=?, pull_secret=?, namespaces=?, cluster_ids=?, updated_at=? WHERE id=?`,
+		g.Name, g.Kind, g.Host, g.Endpoint, jsonList(g.Mirrors), g.Username, g.PasswordSecretID, g.CACert,
+		boolInt(g.SkipVerify), boolInt(g.PullSecret), jsonList(g.Namespaces), jsonList(g.ClusterIDs), ts(g.UpdatedAt), g.ID)
+	if err != nil {
+		return registryConflict(err, g)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) GetRegistry(ctx context.Context, id string) (*store.Registry, error) {
+	g, err := scanRegistry(d.db.QueryRowContext(ctx, `SELECT `+registryCols+` FROM registries WHERE id = ?`, id))
+	return g, notFound(err)
+}
+
+func (d *DB) ListRegistries(ctx context.Context) ([]store.Registry, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+registryCols+` FROM registries ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []store.Registry{}
+	for rows.Next() {
+		g, err := scanRegistry(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *g)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) DeleteRegistry(ctx context.Context, id string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var pw sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT password_secret_id FROM registries WHERE id = ?`, id).Scan(&pw); err != nil {
+		return notFound(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM registries WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if pw.Valid {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM secrets WHERE id = ?`, pw.String); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

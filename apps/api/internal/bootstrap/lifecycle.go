@@ -130,3 +130,29 @@ const (
 func EtcdMemberRemoveScript(node, host string) string {
 	return render("etcd-member-remove", map[string]string{"Node": node, "PeerURL": "https://" + net.JoinHostPort(host, "2380")})
 }
+
+// RegistryHost is one /etc/containerd/certs.d/<Dir> entry.
+type RegistryHost struct {
+	Dir  string // registry host (docker.io, registry.example.com:5000)
+	TOML string // hosts.toml content
+	CA   string // PEM bundle ("" for none)
+}
+
+// RegistriesScript writes the hosts.toml of every registry (removing the ones
+// k8sfront created before and that no longer exist) and makes containerd read
+// /etc/containerd/certs.d, restarting it only when that setting changed.
+func RegistriesScript(hosts []RegistryHost) string {
+	return registriesScript(hosts, "/etc/containerd/certs.d", "/etc/containerd/config.toml")
+}
+
+func registriesScript(hosts []RegistryHost, certsDir, config string) string {
+	for _, h := range hosts {
+		if strings.Contains(h.TOML, "K8SFRONT_EOF") || strings.Contains(h.CA, "K8SFRONT_EOF") {
+			panic("registry content contains the heredoc delimiter") // validated by registry.Normalize
+		}
+	}
+	return render("registries", map[string]any{"Hosts": hosts, "CertsDir": certsDir, "Config": config})
+}
+
+// ImagePruneScript removes every image not used by a container (crictl rmi --prune).
+func ImagePruneScript() string { return render("image-prune", nil) }

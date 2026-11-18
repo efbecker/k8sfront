@@ -105,6 +105,18 @@ func (s *Server) Handler() http.Handler {
 	priv("POST /api/v1/clusters/{id}/rolling-reboot", s.rollingReboot)
 	priv("POST /api/v1/clusters/{id}/certs", s.certsJob)
 
+	// Registries & images.
+	priv("GET /api/v1/registries", s.listRegistries)
+	priv("POST /api/v1/registries", s.createRegistry)
+	priv("GET /api/v1/registries/{id}", s.getRegistry)
+	priv("PATCH /api/v1/registries/{id}", s.updateRegistry)
+	priv("DELETE /api/v1/registries/{id}", s.deleteRegistry)
+	priv("POST /api/v1/registries/{id}/check", s.checkRegistry)
+	priv("POST /api/v1/clusters/{id}/registries/sync", s.syncRegistries)
+	priv("GET /api/v1/clusters/{id}/k8s/images", s.imageCatalog)
+	priv("POST /api/v1/clusters/{id}/images/prepull", s.prepullImages)
+	priv("POST /api/v1/clusters/{id}/images/prune", s.pruneImages)
+
 	priv("GET /api/v1/audit", s.listAudit)
 
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

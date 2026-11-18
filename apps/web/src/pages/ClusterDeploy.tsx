@@ -27,6 +27,12 @@ data:
   mensagem: "olá do k8sfront"
 `;
 
+/** Registry host of an image reference, as containerd resolves it (nginx → docker.io). */
+function imageHost(image: string) {
+  const first = image.trim().split("/")[0] ?? "";
+  return image.includes("/") && (first.includes(".") || first.includes(":") || first === "localhost") ? first.toLowerCase() : "docker.io";
+}
+
 function emptyApp(): AppSpec {
   return {
     name: "",
@@ -87,6 +93,11 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
     setValidated("");
   }, [key]);
   const num = (v: string) => (v === "" ? 0 : Number(v));
+  const registries = useQuery({ queryKey: ["registries"], queryFn: api.registries });
+  const withCreds = (registries.data ?? []).filter(
+    (r) => r.username && r.hasPassword && (r.clusterIds.length === 0 || r.clusterIds.includes(clusterId)),
+  );
+  const autoRegistry = withCreds.find((r) => r.pullSecret && r.host === imageHost(app.image));
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -240,23 +251,57 @@ function AppTab({ clusterId, onOpenInEditor }: { clusterId: string; onOpenInEdit
 
           <Section
             title="Registry privado"
-            description="Credenciais viram um Secret dockerconfigjson criado só no apply; não aparecem no preview nem nos logs."
-            toggle={<Toggle label="Usar" on={!!app.pullSecret} onChange={(on) => set({ pullSecret: on ? { name: "", server: "", username: "", password: "" } : undefined })} />}
+            description="Use um registry cadastrado (o Secret compartilhado k8sfront-registry-<nome> é criado no namespace) ou credenciais avulsas. Senhas nunca aparecem no preview nem nos logs."
+            toggle={
+              <Toggle
+                label="Usar"
+                on={!!app.pullSecret}
+                onChange={(on) =>
+                  set({
+                    pullSecret: on
+                      ? { name: "", server: "", username: "", password: "", registryId: autoRegistry?.id ?? withCreds[0]?.id }
+                      : undefined,
+                  })
+                }
+              />
+            }
           >
+            {!app.pullSecret && autoRegistry && (
+              <p className="text-muted-foreground text-xs">
+                A imagem é de <span className="font-mono">{autoRegistry.host}</span>: o registry cadastrado <b>{autoRegistry.name}</b> será usado automaticamente.
+              </p>
+            )}
             {app.pullSecret && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Secret existente (opcional)" hint="Preencha só este campo para reaproveitar um Secret.">
-                  <Input value={app.pullSecret.name} placeholder={`${app.name || "app"}-registry`} onChange={(e) => set({ pullSecret: { ...app.pullSecret!, name: e.target.value.trim() } })} />
+                <Field label="Origem das credenciais" className="sm:col-span-2">
+                  <NativeSelect
+                    value={app.pullSecret.registryId ?? ""}
+                    onChange={(e) => set({ pullSecret: { name: "", server: "", username: "", password: "", registryId: e.target.value || undefined } })}
+                  >
+                    {withCreds.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        Registry cadastrado: {r.name} ({r.host})
+                      </option>
+                    ))}
+                    <option value="">Credenciais avulsas / Secret existente</option>
+                  </NativeSelect>
                 </Field>
-                <Field label="Servidor">
-                  <Input value={app.pullSecret.server} placeholder="registry.exemplo.com" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, server: e.target.value.trim() } })} />
-                </Field>
-                <Field label="Usuário">
-                  <Input value={app.pullSecret.username} autoComplete="off" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, username: e.target.value } })} />
-                </Field>
-                <Field label="Senha / token">
-                  <Input type="password" value={app.pullSecret.password} autoComplete="new-password" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, password: e.target.value } })} />
-                </Field>
+                {!app.pullSecret.registryId && (
+                  <>
+                    <Field label="Secret existente (opcional)" hint="Preencha só este campo para reaproveitar um Secret.">
+                      <Input value={app.pullSecret.name} placeholder={`${app.name || "app"}-registry`} onChange={(e) => set({ pullSecret: { ...app.pullSecret!, name: e.target.value.trim() } })} />
+                    </Field>
+                    <Field label="Servidor">
+                      <Input value={app.pullSecret.server} placeholder="registry.exemplo.com" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, server: e.target.value.trim() } })} />
+                    </Field>
+                    <Field label="Usuário">
+                      <Input value={app.pullSecret.username} autoComplete="off" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, username: e.target.value } })} />
+                    </Field>
+                    <Field label="Senha / token">
+                      <Input type="password" value={app.pullSecret.password} autoComplete="new-password" onChange={(e) => set({ pullSecret: { ...app.pullSecret!, password: e.target.value } })} />
+                    </Field>
+                  </>
+                )}
               </div>
             )}
           </Section>

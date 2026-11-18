@@ -47,6 +47,9 @@ func (s *Server) renderApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
 		return
 	}
+	if !s.resolveRegistryPullSecret(r.Context(), w, &app, "", false) {
+		return
+	}
 	if err := app.Normalize(); err != nil {
 		writeValidation(w, err)
 		return
@@ -89,6 +92,9 @@ func (s *Server) deployApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body: "+err.Error())
 		return
 	}
+	if !s.resolveRegistryPullSecret(r.Context(), w, &in.App, r.PathValue("id"), true) {
+		return
+	}
 	if err := in.App.Normalize(); err != nil {
 		writeValidation(w, err)
 		return
@@ -110,7 +116,20 @@ func (s *Server) deployApp(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), applyTimeout)
 	defer cancel()
-	s.finishApply(w, r, "deploy.app", us, a.Apply(ctx, us, in.App.Namespace, in.DryRun))
+	sum := a.Apply(ctx, us, in.App.Namespace, in.DryRun)
+	if !in.DryRun {
+		s.afterApply(r, []string{in.App.Namespace})
+	}
+	s.finishApply(w, r, "deploy.app", us, sum)
+}
+
+// afterApply gives the namespaces a deploy touched the registry pull secrets
+// (default ServiceAccount), so later workloads there pull without extra setup.
+func (s *Server) afterApply(r *http.Request, namespaces []string) {
+	id := r.PathValue("id")
+	if cl, err := s.Kube.Get(r.Context(), id); err == nil {
+		s.ensurePullSecrets(r.Context(), id, cl, namespaces, true)
+	}
 }
 
 // applyManifest server-side-applies YAML from the editor (dryRun=server first).
@@ -137,9 +156,20 @@ func (s *Server) applyManifest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	nss := touchedNamespaces(objs, in.Namespace)
+	if !in.DryRun {
+		// Existing namespaces first: pods created by this apply already get the secrets.
+		if cl, err := s.Kube.Get(r.Context(), r.PathValue("id")); err == nil {
+			s.ensurePullSecrets(r.Context(), r.PathValue("id"), cl, nss, false)
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), applyTimeout)
 	defer cancel()
-	s.finishApply(w, r, "deploy.apply", objs, a.Apply(ctx, objs, in.Namespace, in.DryRun))
+	sum := a.Apply(ctx, objs, in.Namespace, in.DryRun)
+	if !in.DryRun {
+		s.afterApply(r, nss)
+	}
+	s.finishApply(w, r, "deploy.apply", objs, sum)
 }
 
 // deleteObjects removes the objects of a manifest (the Central de Deploy
@@ -169,7 +199,11 @@ func (s *Server) deleteObjects(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch {
 	case in.App != nil:
-		// Everything the form generates for this app, pull secret included.
+		// Everything the form generates for this app, pull secret included
+		// (except a registered registry's shared Secret).
+		if !s.resolveRegistryPullSecret(r.Context(), w, in.App, r.PathValue("id"), false) {
+			return
+		}
 		if err = in.App.Normalize(); err == nil {
 			objs, _, err = in.App.Render()
 		}

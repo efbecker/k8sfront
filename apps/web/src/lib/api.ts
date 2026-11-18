@@ -328,7 +328,8 @@ export interface AppSpec {
   service?: { type: "ClusterIP" | "NodePort" | "LoadBalancer"; port: number; nodePort: number };
   ingress?: { host: string; path: string; className: string; tlsSecret: string };
   volume?: { size: string; storageClass: string; mountPath: string; accessMode: string };
-  pullSecret?: { name: string; server: string; username: string; password: string };
+  /** Manual credentials, an existing Secret (name), or a registered registry (registryId). */
+  pullSecret?: { name: string; server: string; username: string; password: string; registryId?: string };
 }
 
 export interface ApplyResult {
@@ -491,6 +492,92 @@ export interface CertsResult {
 
 export type RebootPolicy = "never" | "if-required" | "always";
 
+// --- Registries & images ---------------------------------------------------------
+
+export type RegistryKind = "dockerhub" | "ghcr" | "quay" | "harbor" | "generic";
+
+export interface Registry {
+  id: string;
+  name: string;
+  kind: RegistryKind;
+  host: string;
+  endpoint: string;
+  mirrors: string[];
+  username: string;
+  hasPassword: boolean;
+  caCert: string;
+  skipVerify: boolean;
+  pullSecret: boolean;
+  /** Empty: every non-system namespace. */
+  namespaces: string[];
+  /** Empty: every managed cluster. */
+  clusterIds: string[];
+  secretName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RegistryInput {
+  name?: string;
+  kind?: RegistryKind;
+  host?: string;
+  endpoint?: string;
+  mirrors?: string[];
+  username?: string;
+  password?: string;
+  clearPassword?: boolean;
+  caCert?: string;
+  skipVerify?: boolean;
+  pullSecret?: boolean;
+  namespaces?: string[];
+  clusterIds?: string[];
+}
+
+export interface RegistryCheck {
+  ok: boolean;
+  authenticated: boolean;
+  message: string;
+  endpoint: string;
+}
+
+export interface CatalogImage {
+  ref: string;
+  name: string;
+  host: string;
+  tag?: string;
+  digest?: string;
+  sizeBytes: number;
+  nodes: string[];
+  pods: number;
+  uses: { namespace: string; kind: string; name: string }[];
+  inUse: boolean;
+  system: boolean;
+  registry?: string;
+}
+
+export interface ImageCatalog {
+  images: CatalogImage[];
+  nodes: string[];
+  truncated: string[];
+  collectedAt: string;
+}
+
+export interface PullState {
+  node: string;
+  image: string;
+  state: "pending" | "pulled" | "failed";
+  message?: string;
+}
+
+export interface PruneNode {
+  serverId: string;
+  name: string;
+  removed: number;
+  remaining: number;
+  freedBytes: number;
+  error?: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -592,6 +679,16 @@ export const api = {
   osUpdate: (id: string, serverIds: string[], reboot: RebootPolicy) => request<Job>("POST", `/clusters/${id}/os-updates`, { serverIds, reboot }),
   rollingReboot: (id: string, serverIds: string[]) => request<Job>("POST", `/clusters/${id}/rolling-reboot`, { serverIds }),
   certs: (id: string, action: "check" | "renew") => request<Job>("POST", `/clusters/${id}/certs`, { action }),
+
+  registries: () => request<Registry[]>("GET", "/registries"),
+  createRegistry: (input: RegistryInput) => request<Registry>("POST", "/registries", input),
+  updateRegistry: (id: string, input: RegistryInput) => request<Registry>("PATCH", `/registries/${id}`, input),
+  deleteRegistry: (id: string) => request<void>("DELETE", `/registries/${id}`),
+  checkRegistry: (id: string) => request<RegistryCheck>("POST", `/registries/${id}/check`),
+  syncRegistries: (clusterId: string) => request<Job>("POST", `/clusters/${clusterId}/registries/sync`),
+  images: (clusterId: string) => request<ImageCatalog>("GET", `/clusters/${clusterId}/k8s/images`),
+  prepullImages: (clusterId: string, images: string[]) => request<Job>("POST", `/clusters/${clusterId}/images/prepull`, { images }),
+  pruneImages: (clusterId: string, serverIds: string[] = []) => request<Job>("POST", `/clusters/${clusterId}/images/prune`, { serverIds }),
 };
 
 /** Human labels for job kinds. */
@@ -607,6 +704,9 @@ export const jobKindLabel: Record<string, string> = {
   "cluster.rolling-reboot": "Rolling reboot",
   "cluster.certs": "Certificados do kubeadm",
   "cluster.helm": "Helm",
+  "cluster.registries-sync": "Aplicar registries",
+  "cluster.image-prepull": "Pré-pull de imagens",
+  "cluster.image-prune": "Limpar imagens sem uso",
 };
 
 export const isFinal = (s: JobStatus) => s === "succeeded" || s === "failed" || s === "cancelled" || s === "paused";

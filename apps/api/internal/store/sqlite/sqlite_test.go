@@ -88,3 +88,40 @@ func TestJobTransitionsAndLogs(t *testing.T) {
 		t.Fatalf("unexpected job: %+v", got)
 	}
 }
+
+func TestRegistriesCRUD(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t)
+	sid := "s1"
+	if err := db.PutSecret(ctx, &store.Secret{ID: sid, Kind: store.SecretRegistryAuth, Ciphertext: []byte{1}, KeyID: "k"}); err != nil {
+		t.Fatal(err)
+	}
+	r := &store.Registry{ID: "r1", Name: "hub", Kind: "dockerhub", Host: "docker.io", Endpoint: "https://registry-1.docker.io",
+		Mirrors: []string{"https://cache:5000"}, Username: "ci", PasswordSecretID: &sid, SkipVerify: true, PullSecret: true, Namespaces: []string{"apps"}}
+	if err := db.CreateRegistry(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateRegistry(ctx, &store.Registry{ID: "r2", Name: "other", Kind: "generic", Host: "docker.io", Endpoint: "https://x"}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("same host: %v", err)
+	}
+	got, err := db.GetRegistry(ctx, "r1")
+	if err != nil || got.Mirrors[0] != "https://cache:5000" || !got.SkipVerify || got.Namespaces[0] != "apps" || len(got.ClusterIDs) != 0 || *got.PasswordSecretID != sid {
+		t.Fatalf("get: %+v %v", got, err)
+	}
+	got.ClusterIDs = []string{"c1"}
+	if err := db.UpdateRegistry(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.AppliesTo("c1") || got.AppliesTo("c2") {
+		t.Fatal("AppliesTo")
+	}
+	if err := db.DeleteRegistry(ctx, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetSecret(ctx, sid); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("password secret must be deleted with the registry")
+	}
+	if err := db.DeleteRegistry(ctx, "r1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("delete twice")
+	}
+}

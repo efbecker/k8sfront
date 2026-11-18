@@ -77,14 +77,16 @@ type VolumeSpec struct {
 	AccessMode   string `json:"accessMode"` // ReadWriteOnce | ReadWriteMany | ReadOnlyMany | ReadWriteOncePod
 }
 
-// PullSecret references an existing imagePullSecret (Name) or carries
-// registry credentials that become a dockerconfigjson Secret at apply time.
-// The password is never rendered into the preview.
+// PullSecret references an existing imagePullSecret (Name), carries
+// registry credentials that become a dockerconfigjson Secret at apply time,
+// or points at a registered registry (RegistryID, resolved by the API into
+// the other fields). The password is never rendered into the preview.
 type PullSecret struct {
-	Name     string `json:"name"`
-	Server   string `json:"server"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Name       string `json:"name"`
+	Server     string `json:"server"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	RegistryID string `json:"registryId,omitempty"`
 }
 
 // HasCredentials reports whether a Secret must be created from credentials.
@@ -391,8 +393,8 @@ func (a *AppSpec) PullSecretObject() (*unstructured.Unstructured, error) {
 // name was not created by k8sfront and is left alone.
 func (a *AppSpec) CreatedPullSecretRef() *ObjectRef {
 	p := a.PullSecret
-	if p == nil || p.Server == "" || p.Username == "" {
-		return nil
+	if p == nil || p.Server == "" || p.Username == "" || p.RegistryID != "" {
+		return nil // a registered registry's Secret is shared: never deleted with the app
 	}
 	return &ObjectRef{APIVersion: "v1", Kind: "Secret", Namespace: a.Namespace, Name: p.secretName(a.Name)}
 }

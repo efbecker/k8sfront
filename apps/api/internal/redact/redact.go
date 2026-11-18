@@ -30,6 +30,9 @@ var patterns = []struct {
 	{regexp.MustCompile(`(--certificate-key[ =])[a-f0-9]{64}`), "${1}" + Mask},
 	{regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)\S+`), "${1}" + Mask},
 	{regexp.MustCompile(`(?i)((?:client-key-data|client-certificate-data|token|password)\s*[:=]\s*)\S+`), "${1}" + Mask},
+	// Registry credentials: dockerconfigjson payloads (JSON or base64 in a Secret).
+	{regexp.MustCompile(`(?i)("(?:auth|password|identitytoken|registrytoken)"\s*:\s*")[^"]*`), "${1}" + Mask},
+	{regexp.MustCompile(`(\.dockerconfigjson"?\s*:\s*"?)[A-Za-z0-9+/=]{8,}`), "${1}" + Mask},
 }
 
 // Redactor masks registered secrets and known secret patterns. It is safe for

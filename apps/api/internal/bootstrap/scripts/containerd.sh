@@ -25,6 +25,15 @@ if ! grep -Eq '^[[:space:]]*bin_dirs?[[:space:]]*=.*/opt/cni/bin' "$cfg"; then
   log "Não foi possível apontar o diretório de plugins CNI para /opt/cni/bin em $cfg" >&2
   exit 1
 fi
+# Registry hosts (mirrors, private CAs) are read from /etc/containerd/certs.d,
+# managed by the k8sfront registry sync (cluster.registries-sync).
+install -d -m 0755 /etc/containerd/certs.d
+sed -ri "s#^([[:space:]]*)config_path[[:space:]]*=[[:space:]]*(\"\"|'')[[:space:]]*\$#\\1config_path = '/etc/containerd/certs.d'#" "$cfg"
+if ! grep -Eq "^[[:space:]]*config_path[[:space:]]*=[[:space:]]*[\"']/etc/containerd/certs\.d" "$cfg"; then
+  log "Não foi possível apontar config_path do registry para /etc/containerd/certs.d em $cfg" >&2
+  exit 1
+fi
+log "Registries em /etc/containerd/certs.d"
 install -d -m 0755 /opt/cni/bin /etc/cni/net.d
 for f in /usr/lib/cni/*; do
   if [ -f "$f" ] && [ ! -e "/opt/cni/bin/${f##*/}" ]; then cp -p "$f" /opt/cni/bin/; fi
